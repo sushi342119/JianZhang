@@ -1,5 +1,7 @@
 apply plugin: 'com.android.application'
 
+def hasReleaseKeystore = file("jianzhang-release.jks").exists()
+
 android {
     namespace = "com.jianzhang.tracker"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -15,18 +17,22 @@ android {
         }
     }
     signingConfigs {
-        release {
-            storeFile file("jianzhang-release.jks")
-            storePassword "jianzhang2026"
-            keyAlias "jianzhang"
-            keyPassword "jianzhang2026"
-            v1SigningEnabled true
-            v2SigningEnabled true
+        if (hasReleaseKeystore) {
+            release {
+                storeFile file("jianzhang-release.jks")
+                storePassword "jianzhang2026"
+                keyAlias "jianzhang"
+                keyPassword "jianzhang2026"
+                v1SigningEnabled true
+                v2SigningEnabled true
+            }
         }
     }
     buildTypes {
         release {
-            signingConfig signingConfigs.release
+            if (hasReleaseKeystore) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
