@@ -4,16 +4,42 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Minimalist Wallet/Ledger Card Frame -->
+
+    <!-- Back Tilted Emerald Card (Subscription & Work Time Layer) -->
+    <group
+        android:pivotX="51"
+        android:pivotY="53"
+        android:rotation="-8">
+        <path
+            android:fillColor="#10B981"
+            android:fillAlpha="0.9"
+            android:pathData="M39.5,29.5h26c4.7,0 8.5,3.8 8.5,8.5v28c0,4.7 -3.8,8.5 -8.5,8.5h-26c-4.7,0 -8.5,-3.8 -8.5,-8.5v-28c0,-4.7 3.8,-8.5 8.5,-8.5z" />
+    </group>
+
+    <!-- Front Clean Ivory Ledger Card -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M33,31h42c3.31,0 6,2.69 6,6v34c0,3.31 -2.69,6 -6,6H33c-3.31,0 -6,-2.69 -6,-6V37c0,-3.31 2.69,-6 6,-6z" />
-    <!-- Clean Ledger Lines -->
+        android:fillColor="#FAFAFA"
+        android:pathData="M40,33h26c4.97,0 9,4.03 9,9v26c0,4.97 -4.03,9 -9,9H40c-4.97,0 -9,-4.03 -9,-9V42c0,-4.97 4.03,-9 9,-9z" />
+
+    <!-- Minimalist Balance Upward Curve -->
     <path
-        android:fillColor="#18181B"
-        android:pathData="M35,43h22v4.5H35zM35,52.5h30V57H35zM35,62h16v4.5H35z" />
-    <!-- Accent Sparkle Dot -->
+        android:fillColor="#00000000"
+        android:strokeColor="#141417"
+        android:strokeWidth="4.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M40.5,59 L48.5,51.5 L54.5,56 L64.5,45" />
+
+    <!-- Subtle Ledger Base Line -->
     <path
-        android:fillColor="#10B981"
-        android:pathData="M68,60.5a4.5,4.5 0,1 1,0 9a4.5,4.5 0,1 1,0 -9z" />
+        android:fillColor="#00000000"
+        android:strokeColor="#D4D4D8"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:pathData="M40.5,67.5 L56.5,67.5" />
+
+    <!-- AI Four-Point Emerald Sparkle Star -->
+    <path
+        android:fillColor="#34D399"
+        android:pathData="M75.5,22 C75.5,27.6 76.9,29 82.5,29 C76.9,29 75.5,30.4 75.5,36 C75.5,30.4 74.1,29 68.5,29 C74.1,29 75.5,27.6 75.5,22 Z" />
 </vector>

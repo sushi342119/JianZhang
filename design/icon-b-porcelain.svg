@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgB" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#F2EFE9"/>
+    </linearGradient>
+  </defs>
+  <!-- Warm Porcelain Background -->
+  <rect width="512" height="512" rx="116" fill="url(#bgB)"/>
+  <!-- Minimalist Bamboo Crown (Top radical of 简) -->
+  <path d="M164 166 L186 142 M186 154 L232 154" fill="none" stroke="#18181B" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M280 166 L302 142 M302 154 L348 154" fill="none" stroke="#18181B" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Clean Ledger Gate / Seal Body (简 inner core) -->
+  <rect x="168" y="198" width="176" height="172" rx="34" fill="none" stroke="#18181B" stroke-width="22"/>
+  <!-- Inner Minimalist Ledger Bar -->
+  <line x1="216" y1="262" x2="296" y2="262" stroke="#18181B" stroke-width="18" stroke-linecap="round"/>
+  <line x1="216" y1="308" x2="268" y2="308" stroke="#18181B" stroke-width="18" stroke-linecap="round"/>
+  <!-- Vermilion Seal Dot (Daily Check-in / Stamp) -->
+  <circle cx="304" cy="308" r="13" fill="#E11D48"/>
+</svg>

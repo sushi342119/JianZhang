@@ -1,4 +1,10 @@
-# 简账 (JianZhang) · 极简三合一个人财务与工时订阅助手
+<p align="center">
+  <img src="./design/icon-a-obsidian.svg" width="96" height="96" alt="简账 App Icon" />
+</p>
+
+<h1 align="center">简账 (JianZhang)</h1>
+
+<p align="center">极简三合一个人财务与工时订阅助手 · 日常记账 / 工时补贴算薪 / 国内主流会员提醒</p>
 
 面向中国安卓用户的极简复合工具，将 **日常收支记账**、**工作工时与加班费计算**、**国内主流会员订阅提醒** 融合在同一套克制、干净的三栏界面中。
 
