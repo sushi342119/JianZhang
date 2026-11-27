@@ -17,7 +17,6 @@ import type { ParsedIntent } from './core/aiParser';
 import {
   advanceRenewalDate,
   calcDailyWorkPay,
-  calcMonthWorkSummary,
   formatYmd,
   getSubscriptionNetCycleCny,
 } from './core/calculator';
@@ -35,46 +34,7 @@ import type {
   SubscriptionItem,
   TabKey,
   WorkLog,
-  WorkSettings,
 } from './types';
-
-function syncMonthHousingToLedger(
-  ym: string,
-  workLogs: WorkLog[],
-  workSettings: WorkSettings,
-  ledger: LedgerEntry[]
-): LedgerEntry[] {
-  const linkKey = `housing-${ym}`;
-  const cleaned = ledger.filter((e) => !(e.source === 'work_sync' && e.linkedId === linkKey));
-  if (!workSettings.autoSyncWorkToLedger || workSettings.salaryMode !== 'hourly') {
-    return cleaned;
-  }
-  const summary = calcMonthWorkSummary(ym, workLogs, workSettings);
-  if (summary.housingAllowance <= 0) {
-    return cleaned;
-  }
-  const entryDate = formatYmd(new Date()).startsWith(ym) ? formatYmd(new Date()) : `${ym}-28`;
-  const note =
-    summary.shortfallDays <= 0
-      ? `满勤 ${summary.attendedNormalDays}/${summary.targetWorkdays} 天，全额发放`
-      : `出勤 ${summary.attendedNormalDays}/${summary.targetWorkdays} 天，缺勤扣 ¥${summary.housingDeduction.toFixed(1)}`;
-
-  return [
-    {
-      id: `lw-${linkKey}`,
-      date: entryDate,
-      type: 'income',
-      category: '工时薪资',
-      title: `${parseInt(ym.split('-')[1], 10)}月住房补贴`,
-      amount: Number(summary.housingAllowance.toFixed(2)),
-      note,
-      source: 'work_sync',
-      linkedId: linkKey,
-      createdAt: Date.now(),
-    },
-    ...cleaned,
-  ];
-}
 
 export function App() {
   const [db, setDb] = useState<AppDatabase | null>(null);
@@ -140,29 +100,10 @@ export function App() {
       return { ...w, calculatedPay: pay };
     });
 
-    let nextLedger = [...db.ledger];
-    if (nextSettings.work.salaryMode === 'hourly' && nextSettings.work.autoSyncWorkToLedger) {
-      nextLedger = nextLedger.map((e) => {
-        if (e.source === 'work_sync' && e.linkedId && /^\d{4}-\d{2}-\d{2}$/.test(e.linkedId)) {
-          const match = recomputedLogs.find((w) => w.date === e.linkedId);
-          if (match && match.calculatedPay !== undefined) {
-            return { ...e, amount: Number(match.calculatedPay.toFixed(2)) };
-          }
-        }
-        return e;
-      });
-    }
-
-    const monthsTouched = Array.from(new Set(recomputedLogs.map((w) => w.date.slice(0, 7))));
-    for (const ym of monthsTouched) {
-      nextLedger = syncMonthHousingToLedger(ym, recomputedLogs, nextSettings.work, nextLedger);
-    }
-
     persist({
       ...db,
       settings: nextSettings,
       workLogs: recomputedLogs,
-      ledger: nextLedger,
     });
   };
 
@@ -177,97 +118,56 @@ export function App() {
         },
       },
     };
-    const nextLedger = syncMonthHousingToLedger(ym, db.workLogs, nextSettings.work, db.ledger);
-    persist({ ...db, settings: nextSettings, ledger: nextLedger });
+    persist({ ...db, settings: nextSettings });
   };
 
-  const handleSaveWorkLog = (input: Omit<WorkLog, 'id'>, syncToLedger: boolean) => {
+  // Work logs ONLY accumulate in WorkView as pending salary for next month; never auto-added to current month's Ledger
+  const handleSaveWorkLog = (input: Omit<WorkLog, 'id'>) => {
     const existing = db.workLogs.find((w) => w.date === input.date);
     const id = existing?.id || `w-${input.date}`;
-    const dPay = calcDailyWorkPay({ ...input, id }, db.settings.work);
-    const pay = dPay.totalDailyPay;
+    const pay = calcDailyWorkPay({ ...input, id }, db.settings.work).totalDailyPay;
 
     const updatedLog: WorkLog = {
       ...input,
       id,
       calculatedPay: pay,
-      syncedToLedger: syncToLedger,
     };
 
     const nextWorkLogs = [updatedLog, ...db.workLogs.filter((w) => w.date !== input.date)];
-
-    let nextLedger = [...db.ledger];
-    if (syncToLedger) {
-      nextLedger = nextLedger.filter(
-        (e) => !(e.source === 'work_sync' && e.linkedId === input.date)
-      );
-      if (pay > 0) {
-        nextLedger.unshift({
-          id: `lw-${input.date}`,
-          date: input.date,
-          type: 'income',
-          category: '工时薪资',
-          title: '工时薪资核算',
-          amount: Number(pay.toFixed(2)),
-          note: `正班 ${input.regularHours}h${
-            input.overtimeHours > 0 ? ` + 加班 ${input.overtimeHours}h` : ''
-          }${dPay.mealPay > 0 ? ` + 餐补¥${dPay.mealPay}` : ''}`,
-          source: 'work_sync',
-          linkedId: input.date,
-          createdAt: Date.now(),
-        });
-      }
-    }
-
-    nextLedger = syncMonthHousingToLedger(
-      input.date.slice(0, 7),
-      nextWorkLogs,
-      db.settings.work,
-      nextLedger
-    );
-
-    persist({ ...db, workLogs: nextWorkLogs, ledger: nextLedger });
+    persist({ ...db, workLogs: nextWorkLogs });
   };
 
-  const handleSettleMonthlySalary = (ym: string, totalPay: number, desc: string) => {
-    const linkKey = `month-${ym}`;
-    const housingKey = `housing-${ym}`;
-    const cleanedLedger = db.ledger.filter(
-      (e) =>
-        !(
-          e.source === 'work_sync' &&
-          (e.linkedId === linkKey || e.linkedId === housingKey || (e.linkedId || '').startsWith(ym))
-        )
-    );
-    const settleDate = formatYmd(new Date()).startsWith(ym) ? formatYmd(new Date()) : `${ym}-28`;
+  // Triggered on actual payday (typically next month): records real received salary into payday month's Ledger
+  const handleRecordPaydaySalary = (
+    sourceMonthYm: string,
+    actualAmount: number,
+    paydayDate: string,
+    note: string
+  ) => {
+    const linkKey = `payday-${sourceMonthYm}`;
+    const cleanedLedger = db.ledger.filter((e) => e.linkedId !== linkKey);
+    const srcMonthNum = parseInt(sourceMonthYm.split('-')[1] || '1', 10);
+
     cleanedLedger.unshift({
       id: `lw-${linkKey}`,
-      date: settleDate,
+      date: paydayDate,
       type: 'income',
-      category: '工时薪资',
-      title: `${parseInt(ym.split('-')[1], 10)}月总工资结算`,
-      amount: Number(totalPay.toFixed(2)),
-      note: desc,
+      category: '工资奖金',
+      title: `${srcMonthNum}月工资到账`,
+      amount: Number(actualAmount.toFixed(2)),
+      note,
       source: 'work_sync',
       linkedId: linkKey,
       createdAt: Date.now(),
     });
+
     persist({ ...db, ledger: cleanedLedger });
-    showToast(`已将 ${ym} 总薪资 ¥${totalPay.toFixed(2)} 结算入账本`);
+    showToast(`已将 ${srcMonthNum} 月工资记入 ${paydayDate.slice(5)} 账本收入`);
   };
 
   const handleDeleteWorkLog = (date: string) => {
     const nextWorkLogs = db.workLogs.filter((w) => w.date !== date);
-    let nextLedger = db.ledger.filter(
-      (e) => !(e.source === 'work_sync' && e.linkedId === date)
-    );
-    nextLedger = syncMonthHousingToLedger(
-      date.slice(0, 7),
-      nextWorkLogs,
-      db.settings.work,
-      nextLedger
-    );
-    persist({ ...db, workLogs: nextWorkLogs, ledger: nextLedger });
+    persist({ ...db, workLogs: nextWorkLogs });
     showToast('已清除该日工时记录');
   };
 
@@ -340,7 +240,6 @@ export function App() {
     let nextLedger = [...db.ledger];
     let nextWork = [...db.workLogs];
     let nextSubs = [...db.subscriptions];
-    const workMonthsTouched = new Set<string>();
 
     for (const item of items) {
       if (item.kind === 'ledger') {
@@ -356,8 +255,6 @@ export function App() {
         });
         setActiveTab('ledger');
       } else if (item.kind === 'work') {
-        const shouldSyncDaily =
-          db.settings.work.autoSyncWorkToLedger && db.settings.work.salaryMode === 'hourly';
         const wLog: WorkLog = {
           id: `w-${item.date}`,
           date: item.date,
@@ -367,30 +264,8 @@ export function App() {
           includeMeal: item.includeMeal,
           customBonus: item.customBonus || undefined,
           calculatedPay: item.estimatedPay,
-          syncedToLedger: shouldSyncDaily,
         };
         nextWork = [wLog, ...nextWork.filter((w) => w.date !== item.date)];
-        workMonthsTouched.add(item.date.slice(0, 7));
-
-        nextLedger = nextLedger.filter(
-          (e) => !(e.source === 'work_sync' && e.linkedId === item.date)
-        );
-        if (shouldSyncDaily && item.estimatedPay > 0) {
-          nextLedger.unshift({
-            id: `lw-${item.date}`,
-            date: item.date,
-            type: 'income',
-            category: '工时薪资',
-            title: 'AI工时入账',
-            amount: Number(item.estimatedPay.toFixed(2)),
-            note: `正班 ${item.regularHours}h + 加班 ${item.overtimeHours}h${
-              item.includeMeal ? ` + 餐补¥${db.settings.work.dailyMealAllowance}` : ''
-            }`,
-            source: 'work_sync',
-            linkedId: item.date,
-            createdAt: Date.now(),
-          });
-        }
         setActiveTab('work');
       } else if (item.kind === 'sub') {
         const newSub: SubscriptionItem = {
@@ -417,10 +292,6 @@ export function App() {
         nextSubs = [newSub, ...nextSubs];
         setActiveTab('subs');
       }
-    }
-
-    for (const ym of workMonthsTouched) {
-      nextLedger = syncMonthHousingToLedger(ym, nextWork, db.settings.work, nextLedger);
     }
 
     persist({ ...db, ledger: nextLedger, workLogs: nextWork, subscriptions: nextSubs });
@@ -450,6 +321,7 @@ export function App() {
   };
 
   const [yearStr, monStr] = monthYm.split('-');
+  const settledForMonth = db.ledger.find((e) => e.linkedId === `payday-${monthYm}`);
 
   return (
     <div className="min-h-screen bg-zinc-100/80 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex flex-col items-center">
@@ -513,10 +385,11 @@ export function App() {
               monthYm={monthYm}
               workLogs={db.workLogs}
               workSettings={db.settings.work}
+              settledEntry={settledForMonth}
               onSaveWorkLog={handleSaveWorkLog}
               onDeleteWorkLog={handleDeleteWorkLog}
               onUpdateMonthTargetDays={handleUpdateMonthTargetDays}
-              onSettleMonthlySalary={handleSettleMonthlySalary}
+              onRecordPaydaySalary={handleRecordPaydaySalary}
               onOpenWorkSettings={() => setSettingsOpen(true)}
             />
           )}
@@ -621,7 +494,7 @@ export function App() {
           onUpdateSettings={handleUpdateSettings}
           onImportDatabase={(imported) => {
             const safeDb: AppDatabase = {
-              version: 1,
+              version: 3,
               ledger: imported.ledger || [],
               workLogs: imported.workLogs || [],
               subscriptions: imported.subscriptions || [],
@@ -633,7 +506,7 @@ export function App() {
           onClearDemoData={() => {
             persist({
               ...db,
-              version: 2,
+              version: 3,
               ledger: [],
               workLogs: [],
               subscriptions: [],

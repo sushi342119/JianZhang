@@ -32,7 +32,7 @@ export function getDefaultSettings(): AppSettings {
       dailyMealAllowance: 15,
       monthlyHousingAllowance: 200,
       monthlyTargetDaysOverride: {},
-      autoSyncWorkToLedger: true,
+      paydayOfMonth: 15,
     },
     webdav: {
       url: 'https://dav.jianguoyun.com/dav/',
@@ -50,12 +50,9 @@ export function getDefaultSettings(): AppSettings {
   };
 }
 
-/**
- * Brand-new installs start completely clean with zero pre-filled test entries
- */
 export function createStarterDatabase(): AppDatabase {
   return {
-    version: 2,
+    version: 3,
     ledger: [],
     workLogs: [],
     subscriptions: [],
@@ -87,22 +84,27 @@ export async function loadDatabase(): Promise<AppDatabase> {
     if (raw) {
       const parsed = JSON.parse(raw) as AppDatabase;
       const defaults = getDefaultSettings();
-      const isLegacyV1 = !parsed.version || parsed.version < 2;
+      const ver = parsed.version || 1;
 
       const workLogs = (Array.isArray(parsed.workLogs) ? parsed.workLogs : []).filter(
-        (item) => !(isLegacyV1 && LEGACY_DEMO_IDS.has(item.id))
+        (item) => !(ver < 2 && LEGACY_DEMO_IDS.has(item.id))
       );
-      const ledger = (Array.isArray(parsed.ledger) ? parsed.ledger : []).filter(
-        (item) =>
-          !(isLegacyV1 && LEGACY_DEMO_IDS.has(item.id)) &&
-          !(isLegacyV1 && workLogs.length === 0 && item.id.startsWith('lw-housing-'))
-      );
+
+      // v3 migration: strip unpaid daily auto-synced work items from ledger so current month ledger reflects real cashflow
+      const ledger = (Array.isArray(parsed.ledger) ? parsed.ledger : []).filter((item) => {
+        if (ver < 2 && LEGACY_DEMO_IDS.has(item.id)) return false;
+        if (ver < 3 && item.source === 'work_sync' && !(item.linkedId || '').startsWith('payday-')) {
+          return false;
+        }
+        return true;
+      });
+
       const subscriptions = (Array.isArray(parsed.subscriptions) ? parsed.subscriptions : []).filter(
-        (item) => !(isLegacyV1 && LEGACY_DEMO_IDS.has(item.id))
+        (item) => !(ver < 2 && LEGACY_DEMO_IDS.has(item.id))
       );
 
       const merged: AppDatabase = {
-        version: 2,
+        version: 3,
         ledger,
         workLogs,
         subscriptions,
@@ -116,7 +118,7 @@ export async function loadDatabase(): Promise<AppDatabase> {
       };
 
       const normalized = rollForwardOverdueSubscriptions(merged);
-      if (isLegacyV1) {
+      if (ver < 3) {
         await saveDatabase(normalized);
       }
       return normalized;

@@ -67,7 +67,7 @@ export interface WorkSettings {
   monthlyHousingAllowance: number; // default 200 CNY/month (full normal workday attendance required)
   housingDailyDeductionOverride?: number; // optional fixed deduction per absent day; 0/undefined = 200 / targetWorkdays
   monthlyTargetDaysOverride?: Record<string, number>; // per-month custom required normal workdays e.g. {"2026-11": 21}
-  autoSyncWorkToLedger: boolean;
+  paydayOfMonth: number; // default 15 (salary of month M is paid on month M+1 day 15)
 }
 
 export interface WebDavConfig {

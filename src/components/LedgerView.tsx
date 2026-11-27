@@ -88,7 +88,7 @@ export const LedgerView: React.FC<Props> = ({
         className="bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-5 shadow-xs transition active:scale-[0.995] cursor-pointer"
       >
         <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
-          <span>{monthLabel}净结余 (元)</span>
+          <span>{monthLabel}实际收支结余 (元)</span>
           <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
             {showBreakdown ? '收起构成 ▲' : '点此看支出构成 ▼'}
           </span>
@@ -100,13 +100,13 @@ export const LedgerView: React.FC<Props> = ({
 
         <div className="grid grid-cols-3 gap-3 mt-4 pt-3.5 border-t border-zinc-100 dark:border-zinc-800/80">
           <div>
-            <div className="text-[11px] text-zinc-400 dark:text-zinc-500">总收入(含工时)</div>
+            <div className="text-[11px] text-zinc-400 dark:text-zinc-500">已到账收入</div>
             <div className="text-sm font-semibold font-mono text-emerald-600 dark:text-emerald-400 mt-0.5">
               +¥{summary.totalIncome.toFixed(0)}
             </div>
           </div>
           <div>
-            <div className="text-[11px] text-zinc-400 dark:text-zinc-500">日常总支出</div>
+            <div className="text-[11px] text-zinc-400 dark:text-zinc-500">本月总支出</div>
             <div className="text-sm font-semibold font-mono text-zinc-800 dark:text-zinc-200 mt-0.5">
               -¥{summary.totalExpense.toFixed(0)}
             </div>

@@ -248,23 +248,27 @@ export const SettingsSheet: React.FC<Props> = ({
               </div>
             </div>
 
-            {settings.work.salaryMode === 'hourly' ? (
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-xs text-zinc-600 dark:text-zinc-300">
-                  工时/餐补/房补自动同步记入「账本」收入
-                </span>
+            <div className="flex items-center justify-between pt-1 border-t border-zinc-100 dark:border-zinc-800">
+              <span className="text-xs text-zinc-600 dark:text-zinc-300">
+                每月发薪日 (当月工资默认计入次月几号)
+              </span>
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-zinc-400">次月</span>
                 <input
-                  type="checkbox"
-                  checked={settings.work.autoSyncWorkToLedger}
-                  onChange={(e) => updateWork({ autoSyncWorkToLedger: e.target.checked })}
-                  className="w-4 h-4 accent-blue-600"
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={settings.work.paydayOfMonth || 15}
+                  onChange={(e) =>
+                    updateWork({
+                      paydayOfMonth: Math.min(31, Math.max(1, parseInt(e.target.value, 10) || 15)),
+                    })
+                  }
+                  className="w-14 px-2 py-1 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-xs font-mono text-center outline-none"
                 />
+                <span className="text-xs text-zinc-400">日</span>
               </div>
-            ) : (
-              <div className="text-[11px] text-zinc-400 pt-0.5">
-                提示：固定月底薪模式下，可在「工时」页顶部一键将当月总工资（含餐补与满勤房补）结算入账本。
-              </div>
-            )}
+            </div>
           </div>
 
           {/* 2. WebDAV Cloud Sync & Local Backup */}

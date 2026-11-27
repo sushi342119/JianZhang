@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, Wallet } from 'lucide-react';
+import { Check, Wallet, X } from 'lucide-react';
 import {
   calcDailyWorkPay,
   calcMonthWorkSummary,
@@ -7,32 +7,50 @@ import {
   getEffectiveHourlyBase,
   isMealIncluded,
 } from '../core/calculator';
-import type { OvertimeTier, WorkLog, WorkSettings } from '../types';
+import type { LedgerEntry, OvertimeTier, WorkLog, WorkSettings } from '../types';
 
 interface Props {
   monthYm: string;
   workLogs: WorkLog[];
   workSettings: WorkSettings;
-  onSaveWorkLog: (log: Omit<WorkLog, 'id'>, syncToLedger: boolean) => void;
+  settledEntry?: LedgerEntry;
+  onSaveWorkLog: (log: Omit<WorkLog, 'id'>) => void;
   onDeleteWorkLog: (date: string) => void;
   onUpdateMonthTargetDays: (monthYm: string, days: number) => void;
-  onSettleMonthlySalary: (monthYm: string, totalPay: number, desc: string) => void;
+  onRecordPaydaySalary: (
+    sourceMonthYm: string,
+    actualAmount: number,
+    paydayDate: string,
+    note: string
+  ) => void;
   onOpenWorkSettings: () => void;
+}
+
+function getNextMonthPayday(monthYm: string, paydayOfMonth: number): string {
+  const [y, m] = monthYm.split('-').map(Number);
+  const nextMonthDate = new Date(y, m, 1); // m is 1-based, so month index m = M+1
+  const ny = nextMonthDate.getFullYear();
+  const nm = nextMonthDate.getMonth() + 1;
+  const maxDay = new Date(ny, nm, 0).getDate();
+  const clampedDay = Math.min(Math.max(1, paydayOfMonth || 15), maxDay);
+  return `${ny}-${String(nm).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}`;
 }
 
 export const WorkView: React.FC<Props> = ({
   monthYm,
   workLogs,
   workSettings,
+  settledEntry,
   onSaveWorkLog,
   onDeleteWorkLog,
   onUpdateMonthTargetDays,
-  onSettleMonthlySalary,
+  onRecordPaydaySalary,
   onOpenWorkSettings,
 }) => {
   const todayStr = formatYmd(new Date());
   const defaultSelected = todayStr.startsWith(monthYm) ? todayStr : `${monthYm}-01`;
   const [selectedDate, setSelectedDate] = useState(defaultSelected);
+  const [showPaydayModal, setShowPaydayModal] = useState(false);
 
   useEffect(() => {
     setSelectedDate(todayStr.startsWith(monthYm) ? todayStr : `${monthYm}-01`);
@@ -83,26 +101,43 @@ export const WorkView: React.FC<Props> = ({
   );
 
   const [yearNum, monthNum] = monthYm.split('-').map(Number);
+  const nextMonthNum = monthNum === 12 ? 1 : monthNum + 1;
   const daysInMonth = new Date(yearNum, monthNum, 0).getDate();
   const firstDayDow = (new Date(yearNum, monthNum - 1, 1).getDay() + 6) % 7;
+
   const logMap = useMemo(() => {
     const map: Record<string, WorkLog> = {};
     for (const l of summary.monthLogs) map[l.date] = l;
     return map;
   }, [summary.monthLogs]);
 
-  const handleSave = () => {
-    onSaveWorkLog(
-      {
-        date: selectedDate,
-        regularHours: regHours,
-        overtimeHours: otHours,
-        overtimeTier: otTier,
-        includeMeal: mealOn,
-        calculatedPay: previewPay.totalDailyPay,
-      },
-      workSettings.autoSyncWorkToLedger && workSettings.salaryMode === 'hourly'
+  // Payday modal state
+  const [paydayAmount, setPaydayAmount] = useState('');
+  const [paydayDate, setPaydayDate] = useState('');
+
+  const openPaydaySheet = () => {
+    setPaydayAmount(
+      settledEntry
+        ? String(settledEntry.amount)
+        : summary.totalEstimatedPay.toFixed(2)
     );
+    setPaydayDate(
+      settledEntry
+        ? settledEntry.date
+        : getNextMonthPayday(monthYm, workSettings.paydayOfMonth || 15)
+    );
+    setShowPaydayModal(true);
+  };
+
+  const handleSave = () => {
+    onSaveWorkLog({
+      date: selectedDate,
+      regularHours: regHours,
+      overtimeHours: otHours,
+      overtimeTier: otTier,
+      includeMeal: mealOn,
+      calculatedPay: previewPay.totalDailyPay,
+    });
     setSavedToast(true);
     window.setTimeout(() => setSavedToast(false), 1500);
   };
@@ -111,12 +146,10 @@ export const WorkView: React.FC<Props> = ({
 
   return (
     <div className="space-y-3 pb-6">
-      {/* Work Salary Summary Hero */}
+      {/* Work Salary Summary Hero (Accrued for Next Month's Payday) */}
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-5 shadow-xs">
         <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
-          <span>
-            {monthNum}月预计总收入 (含餐补/满勤房补)
-          </span>
+          <span>{monthNum}月累计预计工资 (次月发薪)</span>
           <button
             type="button"
             onClick={onOpenWorkSettings}
@@ -173,7 +206,7 @@ export const WorkView: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Clean Normal Workday Attendance Bar for Housing Allowance */}
+        {/* Normal Workday Attendance Bar */}
         <div className="mt-3 pt-2.5 border-t border-zinc-100 dark:border-zinc-800/80 flex items-center justify-between text-xs">
           <span className="text-zinc-500 dark:text-zinc-400">
             正常工作日出勤：<b className="text-zinc-800 dark:text-zinc-200 font-mono">{summary.attendedNormalDays}</b> /{' '}
@@ -203,21 +236,25 @@ export const WorkView: React.FC<Props> = ({
           </div>
         </div>
 
-        {workSettings.salaryMode === 'monthly_plus_ot' && summary.totalEstimatedPay > 0 && (
+        {/* Next-Month Payday Settlement Button (Only enters Ledger when user confirms payday!) */}
+        {(summary.totalEstimatedPay > 0 || settledEntry) && (
           <button
             type="button"
-            onClick={() =>
-              onSettleMonthlySalary(
-                monthYm,
-                summary.totalEstimatedPay,
-                `底薪¥${summary.basePay.toFixed(0)}+加班¥${summary.overtimePay.toFixed(0)}+餐补¥${summary.mealPay.toFixed(
-                  0
-                )}+房补¥${summary.housingAllowance.toFixed(1)}`
-              )
-            }
-            className="mt-3 w-full py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200/80 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300 text-xs font-semibold flex items-center justify-center gap-1.5"
+            onClick={openPaydaySheet}
+            className={`mt-3 w-full py-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+              settledEntry
+                ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300'
+                : 'bg-zinc-50 dark:bg-zinc-800/70 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200'
+            }`}
           >
-            <Wallet className="w-3.5 h-3.5" /> 一键将 {monthNum} 月总薪资 (¥{summary.totalEstimatedPay.toFixed(2)}) 结算入账本
+            <Wallet className="w-3.5 h-3.5" />
+            {settledEntry ? (
+              <span>
+                ✓ 已发薪入账 ¥{settledEntry.amount.toFixed(2)} (计入 {settledEntry.date.slice(5)} 账本)
+              </span>
+            ) : (
+              <span>发薪到账后 · 计入 {nextMonthNum} 月账本收入</span>
+            )}
           </button>
         )}
       </div>
@@ -301,10 +338,10 @@ export const WorkView: React.FC<Props> = ({
           </div>
           <div className="text-right">
             <span className="text-xs text-zinc-400 mr-1">
-              {workSettings.salaryMode === 'hourly' ? '当日含餐补' : '当日加班+餐补'}
+              {workSettings.salaryMode === 'hourly' ? '当日计薪' : '当日加班+餐补'}
             </span>
             <span className="text-sm font-bold font-mono text-emerald-600 dark:text-emerald-400">
-              +¥{previewPay.totalDailyPay.toFixed(2)}
+              ¥{previewPay.totalDailyPay.toFixed(2)}
             </span>
           </div>
         </div>
@@ -451,7 +488,7 @@ export const WorkView: React.FC<Props> = ({
           >
             {savedToast ? (
               <>
-                <Check className="w-3.5 h-3.5" /> 已保存并更新餐补/房补
+                <Check className="w-3.5 h-3.5" /> 已计入本月工时累计
               </>
             ) : (
               <span>保存当日工时</span>
@@ -468,6 +505,81 @@ export const WorkView: React.FC<Props> = ({
           )}
         </div>
       </div>
+
+      {/* Payday Settlement Sheet (Logs Salary into Next Month's Ledger!) */}
+      {showPaydayModal && (
+        <div className="fixed inset-0 z-50 bg-black/45 flex flex-col justify-end">
+          <div className="bg-white dark:bg-zinc-900 rounded-t-3xl p-5 border-t border-zinc-200 dark:border-zinc-800 space-y-3.5">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-base font-bold text-zinc-900 dark:text-zinc-100">
+                  发放 {monthNum} 月工资入账
+                </div>
+                <div className="text-xs text-zinc-400">
+                  将计入实际发薪月份的「账本」收入，不占用 {monthNum} 月支出结余
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPaydayModal(false)}
+                className="p-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label className="text-xs text-zinc-500">实发到手金额 (¥)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={paydayAmount}
+                  onChange={(e) => setPaydayAmount(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-sm font-mono outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-zinc-500">发薪到账日期</label>
+                <input
+                  type="date"
+                  value={paydayDate}
+                  onChange={(e) => setPaydayDate(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-sm font-mono outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="text-[11px] text-zinc-400 bg-zinc-50 dark:bg-zinc-800/60 p-3 rounded-xl">
+              工时应发参考：正班与加班 ¥{(summary.basePay + summary.overtimePay).toFixed(0)} + 餐补 ¥
+              {summary.mealPay.toFixed(0)} + 房补 ¥{summary.housingAllowance.toFixed(1)} ={' '}
+              <b className="text-zinc-700 dark:text-zinc-200">¥{summary.totalEstimatedPay.toFixed(2)}</b>
+              （如有扣除社保个税可直接上方微调实发金额）
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                const amt = parseFloat(paydayAmount);
+                if (!amt || amt <= 0 || !paydayDate) return;
+                onRecordPaydaySalary(
+                  monthYm,
+                  amt,
+                  paydayDate,
+                  `${monthNum}月出勤${summary.workDays}天 (含餐补¥${summary.mealPay.toFixed(
+                    0
+                  )}/房补¥${summary.housingAllowance.toFixed(0)})`
+                );
+                setShowPaydayModal(false);
+              }}
+              className="w-full py-3 rounded-2xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm font-semibold"
+            >
+              确认记入 {paydayDate.slice(0, 7)} 账本收入
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
