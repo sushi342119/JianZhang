@@ -477,16 +477,11 @@ export function App() {
 
           <button
             type="button"
+            aria-label="设置"
             onClick={() => setSettingsOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 text-xs text-zinc-600 dark:text-zinc-300 shadow-2xs"
+            className="w-9 h-9 rounded-full bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 flex items-center justify-center text-zinc-600 dark:text-zinc-300 shadow-2xs active:scale-95 transition"
           >
-            <span
-              className={`w-1.5 h-1.5 rounded-full ${
-                db.settings.webdav.lastSyncAt ? 'bg-emerald-500' : 'bg-zinc-400'
-              }`}
-            />
-            <span>备份与规则</span>
-            <Settings className="w-3.5 h-3.5 text-zinc-400" />
+            <Settings className="w-[18px] h-[18px]" />
           </button>
         </header>
 
@@ -638,12 +633,13 @@ export function App() {
           onClearDemoData={() => {
             persist({
               ...db,
+              version: 2,
               ledger: [],
               workLogs: [],
               subscriptions: [],
             });
             setSettingsOpen(false);
-            showToast('已清空示例数据，可以开始记录你的账本了');
+            showToast('已清空本地全部记录');
           }}
           onSyncAllCalendars={handleSyncAllCalendars}
           onToast={showToast}

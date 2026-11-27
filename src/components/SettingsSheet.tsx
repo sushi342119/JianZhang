@@ -31,6 +31,7 @@ export const SettingsSheet: React.FC<Props> = ({
   onToast,
 }) => {
   const [busy, setBusy] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   if (!open) return null;
@@ -484,13 +485,24 @@ export const SettingsSheet: React.FC<Props> = ({
             )}
 
             <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-              <span className="text-xs text-zinc-500">清空初始示例数据，开始真实记录</span>
+              <span className="text-xs text-zinc-500">清空本地所有账目与记录</span>
               <button
                 type="button"
-                onClick={onClearDemoData}
-                className="px-3 py-1 rounded-lg border border-rose-200 dark:border-rose-900 text-rose-600 text-xs flex items-center gap-1"
+                onClick={() => {
+                  if (!confirmReset) {
+                    setConfirmReset(true);
+                    return;
+                  }
+                  setConfirmReset(false);
+                  onClearDemoData();
+                }}
+                className={`px-3 py-1 rounded-lg border text-xs flex items-center gap-1 transition ${
+                  confirmReset
+                    ? 'bg-rose-600 text-white border-rose-600 font-semibold'
+                    : 'border-rose-200 dark:border-rose-900 text-rose-600'
+                }`}
               >
-                <RotateCcw className="w-3 h-3" /> 清空示例
+                <RotateCcw className="w-3 h-3" /> {confirmReset ? '再点确认清空' : '清空数据'}
               </button>
             </div>
           </div>

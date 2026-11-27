@@ -172,7 +172,7 @@ export const LedgerView: React.FC<Props> = ({
       {/* Minimal Section Bar */}
       <div className="flex items-center justify-between px-1 pt-1">
         <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-          收支明细 (点击条目可编辑) {categoryFilter ? `· ${categoryFilter}` : ''}
+          收支明细{categoryFilter ? ` · ${categoryFilter}` : ''}
         </span>
         <button
           type="button"
