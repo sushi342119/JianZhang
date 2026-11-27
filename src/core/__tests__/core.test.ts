@@ -5,10 +5,11 @@ import {
   calcMonthWorkSummary,
   countWeekdaysInMonth,
   getSubscriptionMonthlyCny,
+  reconcileAutoPaydayLedger,
 } from '../calculator';
 import { parseNaturalLanguageLocal } from '../aiParser';
 import { generateIcsForSubscriptions } from '../nativeBridge';
-import { getDefaultSettings } from '../storage';
+import { createStarterDatabase, getDefaultSettings } from '../storage';
 import type { WorkLog } from '../../types';
 
 describe('JianZhang Core Engines & Allowance Rules', () => {
@@ -151,5 +152,30 @@ describe('JianZhang Core Engines & Allowance Rules', () => {
     expect(ics).toContain('TRIGGER:-P7D');
     expect(ics).toContain('TRIGGER:-P3D');
     expect(ics).toContain('TRIGGER:-P1D');
+  });
+
+  it('auto-merges salary into next month ledger ONLY when scheduled payday arrives', () => {
+    const baseDb = createStarterDatabase();
+    baseDb.settings.work.paydayOfMonth = 15;
+    baseDb.workLogs = [
+      {
+        id: 'w-1',
+        date: '2026-11-27',
+        regularHours: 8,
+        overtimeHours: 2,
+        overtimeTier: 'weekday',
+      },
+    ];
+
+    // Before payday (2026-12-14): ledger must stay empty!
+    const beforeRes = reconcileAutoPaydayLedger(baseDb, '2026-12-14');
+    expect(beforeRes.db.ledger.length).toBe(0);
+
+    // On payday (2026-12-15): automatically merges into 2026-12-15 ledger!
+    const onPaydayRes = reconcileAutoPaydayLedger(baseDb, '2026-12-15');
+    expect(onPaydayRes.newlySettledMonths).toEqual(['2026-11']);
+    expect(onPaydayRes.db.ledger.length).toBe(1);
+    expect(onPaydayRes.db.ledger[0].date).toBe('2026-12-15');
+    expect(onPaydayRes.db.ledger[0].title).toBe('11月工资到账');
   });
 });

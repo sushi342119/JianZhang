@@ -19,6 +19,7 @@ import {
   calcDailyWorkPay,
   formatYmd,
   getSubscriptionNetCycleCny,
+  reconcileAutoPaydayLedger,
 } from './core/calculator';
 import {
   backupToWebDav,
@@ -58,6 +59,25 @@ export function App() {
     });
   }, []);
 
+  // Re-check payday auto-merge whenever app returns to foreground (e.g. crossing midnight into payday)
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        setDb((prev) => {
+          if (!prev) return prev;
+          const { db: reconciled, newlySettledMonths } = reconcileAutoPaydayLedger(prev);
+          if (newlySettledMonths.length > 0 || reconciled !== prev) {
+            saveDatabase(reconciled);
+            return reconciled;
+          }
+          return prev;
+        });
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+
   useEffect(() => {
     if (!db) return;
     const applyTheme = () => {
@@ -72,9 +92,14 @@ export function App() {
     return () => mq.removeEventListener('change', applyTheme);
   }, [db]);
 
-  const persist = (next: AppDatabase) => {
+  const persist = (rawNext: AppDatabase) => {
+    const { db: next, newlySettledMonths } = reconcileAutoPaydayLedger(rawNext);
     setDb(next);
     saveDatabase(next);
+    if (newlySettledMonths.length > 0) {
+      const mNum = parseInt(newlySettledMonths[0].split('-')[1] || '1', 10);
+      showToast(`已达发薪日，${mNum}月工资已自动合并入账本`);
+    }
     if (next.settings.webdav.autoBackup && next.settings.webdav.username) {
       backupToWebDav(next.settings.webdav, next).catch(() => null);
     }
@@ -121,7 +146,6 @@ export function App() {
     persist({ ...db, settings: nextSettings });
   };
 
-  // Work logs ONLY accumulate in WorkView as pending salary for next month; never auto-added to current month's Ledger
   const handleSaveWorkLog = (input: Omit<WorkLog, 'id'>) => {
     const existing = db.workLogs.find((w) => w.date === input.date);
     const id = existing?.id || `w-${input.date}`;
@@ -135,34 +159,6 @@ export function App() {
 
     const nextWorkLogs = [updatedLog, ...db.workLogs.filter((w) => w.date !== input.date)];
     persist({ ...db, workLogs: nextWorkLogs });
-  };
-
-  // Triggered on actual payday (typically next month): records real received salary into payday month's Ledger
-  const handleRecordPaydaySalary = (
-    sourceMonthYm: string,
-    actualAmount: number,
-    paydayDate: string,
-    note: string
-  ) => {
-    const linkKey = `payday-${sourceMonthYm}`;
-    const cleanedLedger = db.ledger.filter((e) => e.linkedId !== linkKey);
-    const srcMonthNum = parseInt(sourceMonthYm.split('-')[1] || '1', 10);
-
-    cleanedLedger.unshift({
-      id: `lw-${linkKey}`,
-      date: paydayDate,
-      type: 'income',
-      category: '工资奖金',
-      title: `${srcMonthNum}月工资到账`,
-      amount: Number(actualAmount.toFixed(2)),
-      note,
-      source: 'work_sync',
-      linkedId: linkKey,
-      createdAt: Date.now(),
-    });
-
-    persist({ ...db, ledger: cleanedLedger });
-    showToast(`已将 ${srcMonthNum} 月工资记入 ${paydayDate.slice(5)} 账本收入`);
   };
 
   const handleDeleteWorkLog = (date: string) => {
@@ -365,14 +361,26 @@ export function App() {
               subscriptions={db.subscriptions}
               rates={db.settings.exchangeRates}
               onUpdateEntry={(updated: LedgerEntry) => {
+                // Mark as 'manual' so auto-reconcile preserves user's custom post-tax edit
+                const locked: LedgerEntry = { ...updated, source: 'manual' };
                 persist({
                   ...db,
-                  ledger: db.ledger.map((e) => (e.id === updated.id ? updated : e)),
+                  ledger: db.ledger.map((e) => (e.id === locked.id ? locked : e)),
                 });
                 showToast('已更新账单条目');
               }}
               onDeleteEntry={(id) => {
-                persist({ ...db, ledger: db.ledger.filter((e) => e.id !== id) });
+                const target = db.ledger.find((e) => e.id === id);
+                let nextDismissed = db.dismissedPaydays || [];
+                if (target?.linkedId?.startsWith('payday-')) {
+                  const ym = target.linkedId.slice('payday-'.length);
+                  nextDismissed = Array.from(new Set([...nextDismissed, ym]));
+                }
+                persist({
+                  ...db,
+                  dismissedPaydays: nextDismissed,
+                  ledger: db.ledger.filter((e) => e.id !== id),
+                });
                 showToast('已删除该条账单');
               }}
               onJumpToSubs={() => setActiveTab('subs')}
@@ -389,7 +397,6 @@ export function App() {
               onSaveWorkLog={handleSaveWorkLog}
               onDeleteWorkLog={handleDeleteWorkLog}
               onUpdateMonthTargetDays={handleUpdateMonthTargetDays}
-              onRecordPaydaySalary={handleRecordPaydaySalary}
               onOpenWorkSettings={() => setSettingsOpen(true)}
             />
           )}
@@ -498,6 +505,7 @@ export function App() {
               ledger: imported.ledger || [],
               workLogs: imported.workLogs || [],
               subscriptions: imported.subscriptions || [],
+              dismissedPaydays: imported.dismissedPaydays || [],
               settings: { ...getDefaultSettings(), ...(imported.settings || {}) },
             };
             persist(safeDb);
@@ -510,6 +518,7 @@ export function App() {
               ledger: [],
               workLogs: [],
               subscriptions: [],
+              dismissedPaydays: [],
             });
             setSettingsOpen(false);
             showToast('已清空本地全部记录');

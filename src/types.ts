@@ -67,7 +67,8 @@ export interface WorkSettings {
   monthlyHousingAllowance: number; // default 200 CNY/month (full normal workday attendance required)
   housingDailyDeductionOverride?: number; // optional fixed deduction per absent day; 0/undefined = 200 / targetWorkdays
   monthlyTargetDaysOverride?: Record<string, number>; // per-month custom required normal workdays e.g. {"2026-11": 21}
-  paydayOfMonth: number; // default 15 (salary of month M is paid on month M+1 day 15)
+  paydayOfMonth: number; // default 15 (salary of month M auto-merges into month M+1 on this day)
+  autoMergePaydayToLedger?: boolean; // default true
 }
 
 export interface WebDavConfig {
@@ -101,6 +102,7 @@ export interface AppDatabase {
   workLogs: WorkLog[];
   subscriptions: SubscriptionItem[];
   settings: AppSettings;
+  dismissedPaydays?: string[]; // months e.g. ["2026-10"] whose auto-merged payday entry was manually deleted
 }
 
 export interface ChinaTemplateTier {

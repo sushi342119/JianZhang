@@ -45,7 +45,7 @@ export interface JianzhangNativePlugin {
   openExternalUrl(options: { url: string }): Promise<void>;
 }
 
-export const APP_VERSION = '1.2.4';
+export const APP_VERSION = '1.2.5';
 export const GITHUB_REPO = 'sushi342119/JianZhang';
 
 const JianzhangNative = registerPlugin<JianzhangNativePlugin>('JianzhangNative');

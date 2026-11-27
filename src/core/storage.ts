@@ -1,6 +1,11 @@
 import { Preferences } from '@capacitor/preferences';
 import type { AppDatabase, AppSettings } from '../types';
-import { advanceRenewalDate, DEFAULT_EXCHANGE_RATES, formatYmd } from './calculator';
+import {
+  advanceRenewalDate,
+  DEFAULT_EXCHANGE_RATES,
+  formatYmd,
+  reconcileAutoPaydayLedger,
+} from './calculator';
 
 const DB_KEY = 'jianzhang_db_v1';
 const LEGACY_DEMO_IDS = new Set([
@@ -33,6 +38,7 @@ export function getDefaultSettings(): AppSettings {
       monthlyHousingAllowance: 200,
       monthlyTargetDaysOverride: {},
       paydayOfMonth: 15,
+      autoMergePaydayToLedger: true,
     },
     webdav: {
       url: 'https://dav.jianguoyun.com/dav/',
@@ -108,6 +114,7 @@ export async function loadDatabase(): Promise<AppDatabase> {
         ledger,
         workLogs,
         subscriptions,
+        dismissedPaydays: Array.isArray(parsed.dismissedPaydays) ? parsed.dismissedPaydays : [],
         settings: {
           ...defaults,
           ...parsed.settings,
@@ -117,11 +124,12 @@ export async function loadDatabase(): Promise<AppDatabase> {
         },
       };
 
-      const normalized = rollForwardOverdueSubscriptions(merged);
-      if (ver < 3) {
-        await saveDatabase(normalized);
+      const subRolled = rollForwardOverdueSubscriptions(merged);
+      const { db: paydayReconciled, newlySettledMonths } = reconcileAutoPaydayLedger(subRolled);
+      if (ver < 3 || newlySettledMonths.length > 0 || paydayReconciled !== subRolled) {
+        await saveDatabase(paydayReconciled);
       }
-      return normalized;
+      return paydayReconciled;
     }
   } catch {
     // ignore corrupt cache

@@ -259,26 +259,48 @@ export const SettingsSheet: React.FC<Props> = ({
               </div>
             </div>
 
-            <div className="flex items-center justify-between pt-1 border-t border-zinc-100 dark:border-zinc-800">
-              <span className="text-xs text-zinc-600 dark:text-zinc-300">
-                每月发薪日 (当月工资默认计入次月几号)
-              </span>
-              <div className="flex items-center gap-1">
-                <span className="text-xs text-zinc-400">次月</span>
+            <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-medium text-zinc-700 dark:text-zinc-200">
+                    到期自动将工资合并入账本
+                  </div>
+                  <div className="text-[11px] text-zinc-400">
+                    到达次月发薪日当天，自动把上月工时工资记入当月账本收入
+                  </div>
+                </div>
                 <input
-                  type="number"
-                  min={1}
-                  max={31}
-                  value={settings.work.paydayOfMonth || 15}
-                  onChange={(e) =>
-                    updateWork({
-                      paydayOfMonth: Math.min(31, Math.max(1, parseInt(e.target.value, 10) || 15)),
-                    })
-                  }
-                  className="w-14 px-2 py-1 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-xs font-mono text-center outline-none"
+                  type="checkbox"
+                  checked={settings.work.autoMergePaydayToLedger !== false}
+                  onChange={(e) => updateWork({ autoMergePaydayToLedger: e.target.checked })}
+                  className="w-4 h-4 accent-blue-600 shrink-0 ml-2"
                 />
-                <span className="text-xs text-zinc-400">日</span>
               </div>
+
+              {settings.work.autoMergePaydayToLedger !== false && (
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-zinc-500">自动合并日期 (每月发薪日)</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs text-zinc-400">次月</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={31}
+                      value={settings.work.paydayOfMonth || 15}
+                      onChange={(e) =>
+                        updateWork({
+                          paydayOfMonth: Math.min(
+                            31,
+                            Math.max(1, parseInt(e.target.value, 10) || 15)
+                          ),
+                        })
+                      }
+                      className="w-14 px-2 py-1 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-xs font-mono text-center outline-none"
+                    />
+                    <span className="text-xs text-zinc-400">日</span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

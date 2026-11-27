@@ -1,4 +1,5 @@
 import type {
+  AppDatabase,
   BillingCycle,
   CurrencyCode,
   LedgerEntry,
@@ -321,5 +322,104 @@ export function calcMonthLedgerSummary(monthYm: string, entries: LedgerEntry[]) 
     netBalance: totalIncome - totalExpense,
     expenseByCategory,
     monthEntries,
+  };
+}
+
+/**
+ * Compute scheduled next-month payday YYYY-MM-DD for a given work month YYYY-MM
+ */
+export function getNextMonthPayday(monthYm: string, paydayOfMonth: number): string {
+  const [y, m] = monthYm.split('-').map(Number);
+  const nextMonthFirst = new Date(y, m, 1); // m is 1-based, so JS month index m is M+1
+  const ny = nextMonthFirst.getFullYear();
+  const nm = nextMonthFirst.getMonth() + 1;
+  const maxDay = new Date(ny, nm, 0).getDate();
+  const clampedDay = Math.min(Math.max(1, paydayOfMonth || 15), maxDay);
+  return `${ny}-${String(nm).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}`;
+}
+
+/**
+ * Automatically merge accrued monthly salaries into the Ledger once today >= scheduled payday
+ */
+export function reconcileAutoPaydayLedger(
+  db: AppDatabase,
+  todayYmd: string = formatYmd(new Date())
+): { db: AppDatabase; newlySettledMonths: string[] } {
+  const ws = db.settings.work;
+  const autoEnabled = ws.autoMergePaydayToLedger !== false;
+  const paydayDay = ws.paydayOfMonth || 15;
+  const dismissed = new Set(db.dismissedPaydays || []);
+
+  const distinctMonths = Array.from(new Set(db.workLogs.map((w) => w.date.slice(0, 7)))).sort();
+  let nextLedger = [...db.ledger];
+  let changed = false;
+  const newlySettledMonths: string[] = [];
+
+  // Also check any existing work_sync payday-* entries whose payday was moved into the future
+  for (const entry of db.ledger) {
+    if (entry.source === 'work_sync' && entry.linkedId?.startsWith('payday-')) {
+      const srcYm = entry.linkedId.slice('payday-'.length);
+      const dueYmd = getNextMonthPayday(srcYm, paydayDay);
+      if (!autoEnabled || todayYmd < dueYmd) {
+        nextLedger = nextLedger.filter((e) => e.id !== entry.id);
+        changed = true;
+      }
+    }
+  }
+
+  if (autoEnabled) {
+    for (const ym of distinctMonths) {
+      const dueYmd = getNextMonthPayday(ym, paydayDay);
+      if (todayYmd < dueYmd) continue; // Not payday yet! Keep strictly in Work tab.
+      if (dismissed.has(ym)) continue; // User explicitly deleted this month's salary entry.
+
+      const summary = calcMonthWorkSummary(ym, db.workLogs, ws);
+      const linkKey = `payday-${ym}`;
+      const existing = nextLedger.find((e) => e.linkedId === linkKey);
+      const srcMonthNum = parseInt(ym.split('-')[1] || '1', 10);
+      const amt = Number(summary.totalEstimatedPay.toFixed(2));
+      const note = `${srcMonthNum}月出勤${summary.workDays}天 (含餐补¥${summary.mealPay.toFixed(
+        0
+      )}/房补¥${summary.housingAllowance.toFixed(0)})`;
+
+      if (amt <= 0) {
+        if (existing && existing.source === 'work_sync') {
+          nextLedger = nextLedger.filter((e) => e.id !== existing.id);
+          changed = true;
+        }
+        continue;
+      }
+
+      if (!existing) {
+        nextLedger.unshift({
+          id: `lw-${linkKey}`,
+          date: dueYmd,
+          type: 'income',
+          category: '工资奖金',
+          title: `${srcMonthNum}月工资到账`,
+          amount: amt,
+          note,
+          source: 'work_sync',
+          linkedId: linkKey,
+          createdAt: Date.now(),
+        });
+        newlySettledMonths.push(ym);
+        changed = true;
+      } else if (existing.source === 'work_sync') {
+        // Keep auto-synced entry up to date if user adjusted past work logs or payday date
+        if (existing.amount !== amt || existing.date !== dueYmd || existing.note !== note) {
+          nextLedger = nextLedger.map((e) =>
+            e.id === existing.id ? { ...e, amount: amt, date: dueYmd, note } : e
+          );
+          changed = true;
+        }
+      }
+      // If existing.source === 'manual', user manually edited post-tax amount in Ledger -> preserve!
+    }
+  }
+
+  return {
+    db: changed ? { ...db, ledger: nextLedger } : db,
+    newlySettledMonths,
   };
 }
