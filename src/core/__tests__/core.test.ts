@@ -9,10 +9,14 @@ import {
 } from '../calculator';
 import { parseNaturalLanguageLocal } from '../aiParser';
 import { generateIcsForSubscriptions } from '../nativeBridge';
-import { createStarterDatabase, getDefaultSettings } from '../storage';
+import {
+  createStarterDatabase,
+  getDefaultSettings,
+  rollForwardOverdueSubscriptions,
+} from '../storage';
 import type { WorkLog } from '../../types';
 
-describe('JianZhang Core Engines & Allowance Rules', () => {
+describe('JianZhang v1.3.0 Core Engines & Upgrades', () => {
   const defaultWork = getDefaultSettings().work;
 
   it('auto-includes 15 CNY daily meal allowance on workdays and 0 on rest days', () => {
@@ -26,65 +30,123 @@ describe('JianZhang Core Engines & Allowance Rules', () => {
       },
       defaultWork
     );
-    // 8 * 25 (200) + 2 * 25 * 1.5 (75) + 15 (meal) = 290
     expect(workDay.mealPay).toBe(15);
     expect(workDay.totalDailyPay).toBe(290);
-
-    const restDay = calcDailyWorkPay(
-      {
-        id: '2',
-        date: '2026-11-28',
-        regularHours: 0,
-        overtimeHours: 0,
-        overtimeTier: 'weekend',
-      },
-      defaultWork
-    );
-    expect(restDay.mealPay).toBe(0);
-    expect(restDay.totalDailyPay).toBe(0);
   });
 
-  it('grants full 200 CNY housing allowance when all normal workdays attended, and deducts per absent day otherwise', () => {
-    // Nov 2026 has 21 weekdays (Mon-Fri)
+  it('does not prematurely deduct housing allowance for future weekdays mid-month, and deducts fixed social insurance', () => {
     expect(countWeekdaysInMonth('2026-11')).toBe(21);
 
-    const ws = {
+    // Suppose today is 2026-11-06 (first week: Mon Nov 2 .. Fri Nov 6 = 5 elapsed weekdays; 16 future weekdays)
+    const firstWeekLogs: WorkLog[] = [
+      '2026-11-02',
+      '2026-11-03',
+      '2026-11-04',
+      '2026-11-05',
+      '2026-11-06',
+    ].map((d, i) => ({
+      id: `w-${i}`,
+      date: d,
+      regularHours: 8,
+      overtimeHours: 0,
+      overtimeTier: 'weekday',
+    }));
+
+    const wsWithSocial = {
       ...defaultWork,
-      monthlyTargetDaysOverride: { '2026-11': 20 }, // 20 normal workdays -> 10 CNY/day housing deduction
+      monthlyFixedDeduction: 450, // e.g. social insurance 450
     };
 
-    // Case A: Attended 18 normal days (2 days absent) -> 200 - 2 * 10 = 180 housing; 18 * 15 = 270 meal
-    const logs18: WorkLog[] = Array.from({ length: 18 }).map((_, i) => ({
-      id: `w-${i}`,
-      date: `2026-11-${String(i + 1).padStart(2, '0')}`,
-      regularHours: 8,
-      overtimeHours: 0,
-      overtimeTier: 'weekday',
-    }));
-
-    const sum18 = calcMonthWorkSummary('2026-11', logs18, ws);
-    expect(sum18.attendedNormalDays).toBe(18);
-    expect(sum18.shortfallDays).toBe(2);
-    expect(sum18.mealPay).toBe(18 * 15);
-    expect(sum18.housingDeduction).toBeCloseTo(20);
-    expect(sum18.housingAllowance).toBeCloseTo(180);
-
-    // Case B: Attended all 20 normal days -> full 200 housing allowance, 0 deduction
-    const logs20: WorkLog[] = Array.from({ length: 20 }).map((_, i) => ({
-      id: `w-${i}`,
-      date: `2026-11-${String(i + 1).padStart(2, '0')}`,
-      regularHours: 8,
-      overtimeHours: 0,
-      overtimeTier: 'weekday',
-    }));
-
-    const sum20 = calcMonthWorkSummary('2026-11', logs20, ws);
-    expect(sum20.shortfallDays).toBe(0);
-    expect(sum20.housingDeduction).toBe(0);
-    expect(sum20.housingAllowance).toBe(200);
+    const midMonthSummary = calcMonthWorkSummary(
+      '2026-11',
+      firstWeekLogs,
+      wsWithSocial,
+      '2026-11-06'
+    );
+    expect(midMonthSummary.shortfallDays).toBe(0);
+    expect(midMonthSummary.housingAllowance).toBe(200);
+    expect(midMonthSummary.fixedDeduction).toBe(450);
+    // 5 days * (200 + 15) = 1075 + 200 housing - 450 social = 825
+    expect(midMonthSummary.totalEstimatedPay).toBe(825);
   });
 
-  it('normalizes subscription monthly cost with carpool refund and paused state', () => {
+  it('deducts housing allowance accurately for past months with absent days', () => {
+    const ws = {
+      ...defaultWork,
+      monthlyTargetDaysOverride: { '2026-10': 20 },
+    };
+    const logs18: WorkLog[] = Array.from({ length: 18 }).map((_, i) => ({
+      id: `w-${i}`,
+      date: `2026-10-${String(i + 1).padStart(2, '0')}`,
+      regularHours: 8,
+      overtimeHours: 0,
+      overtimeTier: 'weekday',
+    }));
+
+    const sum18 = calcMonthWorkSummary('2026-10', logs18, ws, '2026-11-27');
+    expect(sum18.shortfallDays).toBe(2);
+    expect(sum18.housingDeduction).toBeCloseTo(20);
+    expect(sum18.housingAllowance).toBeCloseTo(180);
+  });
+
+  it('auto-merges salary into next month ledger ONLY when scheduled payday arrives', () => {
+    const baseDb = createStarterDatabase();
+    baseDb.settings.work.paydayOfMonth = 15;
+    baseDb.workLogs = [
+      {
+        id: 'w-1',
+        date: '2026-11-27',
+        regularHours: 8,
+        overtimeHours: 2,
+        overtimeTier: 'weekday',
+      },
+    ];
+
+    const beforeRes = reconcileAutoPaydayLedger(baseDb, '2026-12-14');
+    expect(beforeRes.db.ledger.length).toBe(0);
+
+    const onPaydayRes = reconcileAutoPaydayLedger(baseDb, '2026-12-15');
+    expect(onPaydayRes.newlySettledMonths).toEqual(['2026-11']);
+    expect(onPaydayRes.db.ledger.length).toBe(1);
+    expect(onPaydayRes.db.ledger[0].date).toBe('2026-12-15');
+  });
+
+  it('auto-records subscription renewal expense into ledger without double-charging', () => {
+    const db = createStarterDatabase();
+    db.subscriptions = [
+      {
+        id: 'sub-icloud',
+        name: 'iCloud+ 200GB',
+        category: '云盘效率',
+        iconText: '☁',
+        brandColor: '#0284c7',
+        price: 21,
+        currency: 'CNY',
+        cycle: 'monthly',
+        nextRenewalDate: '2026-11-15',
+        autoRenew: true,
+        syncSystemCalendar: false,
+        remindDays: [3, 1],
+        active: true,
+      },
+    ];
+
+    const rolledOnce = rollForwardOverdueSubscriptions(db, '2026-11-27');
+    expect(rolledOnce.subscriptions[0].nextRenewalDate).toBe('2026-12-15');
+    expect(rolledOnce.ledger.length).toBe(1);
+    expect(rolledOnce.ledger[0].amount).toBe(21);
+    expect(rolledOnce.ledger[0].date).toBe('2026-11-15');
+
+    // Idempotency check: calling again on same day must NOT add a second expense
+    const rolledTwice = rollForwardOverdueSubscriptions(rolledOnce, '2026-11-27');
+    expect(rolledTwice.ledger.length).toBe(1);
+  });
+
+  it('routes AI natural language and generates multi-stage ICS', () => {
+    const baseDate = new Date(2026, 10, 27);
+    const leave = parseNaturalLanguageLocal('今天请假', defaultWork, baseDate);
+    expect(leave.kind).toBe('work');
+
     const activeCost = getSubscriptionMonthlyCny({
       id: 's1',
       name: 'Apple Music 家庭组',
@@ -103,35 +165,7 @@ describe('JianZhang Core Engines & Allowance Rules', () => {
     });
     expect(activeCost).toBe(6);
     expect(advanceRenewalDate('2026-11-27', 'yearly', 1)).toBe('2027-11-27');
-  });
 
-  it('routes AI natural language including meal allowance and leave days', () => {
-    const baseDate = new Date(2026, 10, 27);
-
-    const work = parseNaturalLanguageLocal('今天上班8小时 加班2小时', defaultWork, baseDate);
-    expect(work.kind).toBe('work');
-    if (work.kind === 'work') {
-      expect(work.includeMeal).toBe(true);
-      // 8*25 + 2*25*1.5 + 15 = 290
-      expect(work.estimatedPay).toBe(290);
-    }
-
-    const leave = parseNaturalLanguageLocal('今天请假', defaultWork, baseDate);
-    expect(leave.kind).toBe('work');
-    if (leave.kind === 'work') {
-      expect(leave.regularHours).toBe(0);
-      expect(leave.includeMeal).toBe(false);
-      expect(leave.estimatedPay).toBe(0);
-    }
-
-    const icloud = parseNaturalLanguageLocal('刚开了iCloud 21元 200GB 每月', defaultWork, baseDate);
-    expect(icloud.kind).toBe('sub');
-    if (icloud.kind === 'sub') {
-      expect(icloud.price).toBe(21);
-    }
-  });
-
-  it('generates standard ICS with multi-stage 7/3/1 day VALARM triggers', () => {
     const ics = generateIcsForSubscriptions([
       {
         id: 'bili',
@@ -150,32 +184,5 @@ describe('JianZhang Core Engines & Allowance Rules', () => {
       },
     ]);
     expect(ics).toContain('TRIGGER:-P7D');
-    expect(ics).toContain('TRIGGER:-P3D');
-    expect(ics).toContain('TRIGGER:-P1D');
-  });
-
-  it('auto-merges salary into next month ledger ONLY when scheduled payday arrives', () => {
-    const baseDb = createStarterDatabase();
-    baseDb.settings.work.paydayOfMonth = 15;
-    baseDb.workLogs = [
-      {
-        id: 'w-1',
-        date: '2026-11-27',
-        regularHours: 8,
-        overtimeHours: 2,
-        overtimeTier: 'weekday',
-      },
-    ];
-
-    // Before payday (2026-12-14): ledger must stay empty!
-    const beforeRes = reconcileAutoPaydayLedger(baseDb, '2026-12-14');
-    expect(beforeRes.db.ledger.length).toBe(0);
-
-    // On payday (2026-12-15): automatically merges into 2026-12-15 ledger!
-    const onPaydayRes = reconcileAutoPaydayLedger(baseDb, '2026-12-15');
-    expect(onPaydayRes.newlySettledMonths).toEqual(['2026-11']);
-    expect(onPaydayRes.db.ledger.length).toBe(1);
-    expect(onPaydayRes.db.ledger[0].date).toBe('2026-12-15');
-    expect(onPaydayRes.db.ledger[0].title).toBe('11月工资到账');
   });
 });

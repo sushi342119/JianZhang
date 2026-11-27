@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check } from 'lucide-react';
+import { Check, Sparkles } from 'lucide-react';
 import {
   calcDailyWorkPay,
   calcMonthWorkSummary,
   formatYmd,
   getEffectiveHourlyBase,
+  getElapsedWeekdaysInMonth,
   getNextMonthPayday,
   isMealIncluded,
 } from '../core/calculator';
@@ -16,6 +17,7 @@ interface Props {
   workSettings: WorkSettings;
   settledEntry?: LedgerEntry;
   onSaveWorkLog: (log: Omit<WorkLog, 'id'>) => void;
+  onBatchFillStandardDays: (dates: string[]) => void;
   onDeleteWorkLog: (date: string) => void;
   onUpdateMonthTargetDays: (monthYm: string, days: number) => void;
   onOpenWorkSettings: () => void;
@@ -27,6 +29,7 @@ export const WorkView: React.FC<Props> = ({
   workSettings,
   settledEntry,
   onSaveWorkLog,
+  onBatchFillStandardDays,
   onDeleteWorkLog,
   onUpdateMonthTargetDays,
   onOpenWorkSettings,
@@ -70,7 +73,7 @@ export const WorkView: React.FC<Props> = ({
     }
   }, [selectedDate, existingLog, workSettings.standardHoursPerDay]);
 
-  const summary = calcMonthWorkSummary(monthYm, workLogs, workSettings);
+  const summary = calcMonthWorkSummary(monthYm, workLogs, workSettings, todayStr);
   const previewPay = calcDailyWorkPay(
     {
       id: 'preview',
@@ -94,6 +97,12 @@ export const WorkView: React.FC<Props> = ({
     return map;
   }, [summary.monthLogs]);
 
+  // Elapsed weekdays that don't have any WorkLog yet (auto-disappears once filled!)
+  const unloggedElapsedWeekdays = useMemo(() => {
+    const elapsed = getElapsedWeekdaysInMonth(monthYm, todayStr);
+    return elapsed.filter((ymd) => !logMap[ymd]);
+  }, [monthYm, todayStr, logMap]);
+
   const handleSave = () => {
     onSaveWorkLog({
       date: selectedDate,
@@ -116,10 +125,10 @@ export const WorkView: React.FC<Props> = ({
         <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
           <span>
             {settledEntry
-              ? `${monthNum}月工资 (已于 ${settledEntry.date.slice(5)} 自动并入账本)`
+              ? `${monthNum}月实发工资 (已于 ${settledEntry.date.slice(5)} 自动入账)`
               : workSettings.autoMergePaydayToLedger !== false
-              ? `${monthNum}月预计工资 (${scheduledPayday.slice(5)} 自动并入账本)`
-              : `${monthNum}月预计总工资`}
+              ? `${monthNum}月预计实发 (${scheduledPayday.slice(5)} 自动并入账本)`
+              : `${monthNum}月预计实发工资`}
           </span>
           <button
             type="button"
@@ -135,7 +144,9 @@ export const WorkView: React.FC<Props> = ({
             ¥{summary.totalEstimatedPay.toFixed(2)}
           </span>
           <span className="text-xs font-mono text-zinc-400">
-            总工时 {summary.totalHours.toFixed(1)}h
+            {summary.fixedDeduction > 0
+              ? `已扣固定项 ¥${summary.fixedDeduction.toFixed(0)}`
+              : `总工时 ${summary.totalHours.toFixed(1)}h`}
           </span>
         </div>
 
@@ -171,13 +182,12 @@ export const WorkView: React.FC<Props> = ({
               {summary.workDays === 0
                 ? '待出勤'
                 : summary.shortfallDays <= 0
-                ? '已满勤拿满'
-                : `差${summary.shortfallDays}天扣¥${summary.housingDeduction.toFixed(0)}`}
+                ? '无缺勤拿满'
+                : `缺勤${summary.shortfallDays}天扣¥${summary.housingDeduction.toFixed(0)}`}
             </div>
           </div>
         </div>
 
-        {/* Normal Workday Attendance Bar */}
         <div className="mt-3 pt-2.5 border-t border-zinc-100 dark:border-zinc-800/80 flex items-center justify-between text-xs">
           <span className="text-zinc-500 dark:text-zinc-400">
             正常工作日出勤：<b className="text-zinc-800 dark:text-zinc-200 font-mono">{summary.attendedNormalDays}</b> /{' '}
@@ -207,6 +217,25 @@ export const WorkView: React.FC<Props> = ({
           </div>
         </div>
       </div>
+
+      {/* Effortless 1-Tap Batch Fill Pill (Auto-hides once all elapsed weekdays are logged!) */}
+      {unloggedElapsedWeekdays.length > 0 && (
+        <button
+          type="button"
+          onClick={() => onBatchFillStandardDays(unloggedElapsedWeekdays)}
+          className="w-full flex items-center justify-between px-3.5 py-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 text-xs text-zinc-600 dark:text-zinc-300 active:scale-[0.99] transition"
+        >
+          <span className="flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
+            <span>
+              本月有 <b>{unloggedElapsedWeekdays.length}</b> 个已过工作日未打卡
+            </span>
+          </span>
+          <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+            一键补齐标准班 ›
+          </span>
+        </button>
+      )}
 
       {/* Compact Monthly Calendar Grid */}
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-3.5">
@@ -295,7 +324,6 @@ export const WorkView: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Regular Hours Quick Pills */}
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs text-zinc-500 dark:text-zinc-400 shrink-0">正班时长</span>
           <div className="flex items-center gap-1.5 flex-wrap justify-end">
@@ -344,7 +372,6 @@ export const WorkView: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Overtime Hours Quick Pills */}
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs text-zinc-500 dark:text-zinc-400 shrink-0">加班时长</span>
           <div className="flex items-center gap-1.5 flex-wrap justify-end">
@@ -389,7 +416,6 @@ export const WorkView: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Overtime Multiplier & Daily Meal Toggle */}
         <div className="flex items-center justify-between gap-2 pt-1 border-t border-zinc-100 dark:border-zinc-800/80">
           <button
             type="button"
@@ -428,7 +454,6 @@ export const WorkView: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Action Buttons */}
         <div className="flex items-center gap-2 pt-0.5">
           <button
             type="button"

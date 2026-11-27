@@ -11,7 +11,7 @@ export interface LedgerEntry {
   amount: number; // positive number in CNY
   note?: string;
   source?: 'manual' | 'ai' | 'work_sync' | 'sub_sync';
-  linkedId?: string; // linked work record date, housing-YYYY-MM, month-YYYY-MM, or sub id
+  linkedId?: string;
   createdAt: number;
 }
 
@@ -23,10 +23,9 @@ export interface WorkLog {
   regularHours: number;
   overtimeHours: number;
   overtimeTier: OvertimeTier;
-  includeMeal?: boolean; // defaults to true if worked (regularHours > 0 || overtimeHours > 0)
-  customBonus?: number; // extra allowance if any
+  includeMeal?: boolean;
+  customBonus?: number;
   note?: string;
-  syncedToLedger?: boolean;
   calculatedPay?: number;
 }
 
@@ -47,7 +46,7 @@ export interface SubscriptionItem {
   autoRenew: boolean;
   syncSystemCalendar: boolean;
   calendarEventId?: string;
-  remindDays: number[]; // e.g. [7, 3, 1]
+  remindDays: number[];
   note?: string;
   active: boolean;
 }
@@ -58,16 +57,17 @@ export interface WorkSettings {
   salaryMode: SalaryMode;
   hourlyRate: number;
   monthlyBaseSalary: number;
-  standardDaysPerMonth: number; // 21.75 for statutory OT base conversion
+  standardDaysPerMonth: number; // 21.75
   standardHoursPerDay: number; // default 8
   weekdayMultiplier: number; // default 1.5
   weekendMultiplier: number; // default 2.0
   holidayMultiplier: number; // default 3.0
   dailyMealAllowance: number; // default 15 CNY/day
-  monthlyHousingAllowance: number; // default 200 CNY/month (full normal workday attendance required)
-  housingDailyDeductionOverride?: number; // optional fixed deduction per absent day; 0/undefined = 200 / targetWorkdays
-  monthlyTargetDaysOverride?: Record<string, number>; // per-month custom required normal workdays e.g. {"2026-11": 21}
-  paydayOfMonth: number; // default 15 (salary of month M auto-merges into month M+1 on this day)
+  monthlyHousingAllowance: number; // default 200 CNY/month
+  housingDailyDeductionOverride?: number;
+  monthlyFixedDeduction?: number; // e.g. social insurance / dorm utilities deducted monthly
+  monthlyTargetDaysOverride?: Record<string, number>;
+  paydayOfMonth: number; // default 15
   autoMergePaydayToLedger?: boolean; // default true
 }
 
@@ -89,6 +89,8 @@ export interface AiApiConfig {
 
 export interface AppSettings {
   theme: 'system' | 'light' | 'dark';
+  monthlyBudget?: number; // 0 or undefined = hidden
+  autoRecordSubExpense?: boolean; // default true: auto-record autoRenew subscriptions into ledger on renewal date
   defaultRemindDays: number[];
   exchangeRates: Record<CurrencyCode, number>;
   work: WorkSettings;
@@ -102,7 +104,7 @@ export interface AppDatabase {
   workLogs: WorkLog[];
   subscriptions: SubscriptionItem[];
   settings: AppSettings;
-  dismissedPaydays?: string[]; // months e.g. ["2026-10"] whose auto-merged payday entry was manually deleted
+  dismissedPaydays?: string[];
 }
 
 export interface ChinaTemplateTier {

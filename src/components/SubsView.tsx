@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Calendar, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { CHINA_SUB_TEMPLATES } from '../data/chinaTemplates';
 import {
@@ -24,6 +24,7 @@ interface Props {
   onDeleteSub: (id: string) => void;
   onRenewOneCycle: (sub: SubscriptionItem, recordExpense: boolean) => void;
   onToggleCalendar: (sub: SubscriptionItem) => void;
+  registerChildBackHandler: (fn: (() => boolean) | null) => void;
 }
 
 const TEMPLATE_CATS = ['全部', '电商生活', '视频娱乐', '音乐阅读', '云盘效率', 'AI与开发', '通讯账单'] as const;
@@ -36,12 +37,30 @@ export const SubsView: React.FC<Props> = ({
   onDeleteSub,
   onRenewOneCycle,
   onToggleCalendar,
+  registerChildBackHandler,
 }) => {
   const [showTplDrawer, setShowTplDrawer] = useState(false);
   const [tplCat, setTplCat] = useState<string>('全部');
   const [tplSearch, setTplSearch] = useState('');
   const [editingSub, setEditingSub] = useState<SubscriptionItem | null>(null);
   const [selectedTpl, setSelectedTpl] = useState<ChinaSubTemplate | null>(null);
+
+  useEffect(() => {
+    if (editingSub) {
+      registerChildBackHandler(() => {
+        setEditingSub(null);
+        return true;
+      });
+    } else if (showTplDrawer) {
+      registerChildBackHandler(() => {
+        setShowTplDrawer(false);
+        return true;
+      });
+    } else {
+      registerChildBackHandler(null);
+    }
+    return () => registerChildBackHandler(null);
+  }, [editingSub, showTplDrawer, registerChildBackHandler]);
 
   const sortedSubs = [...subscriptions].sort((a, b) => {
     if (a.active !== b.active) return a.active ? -1 : 1;

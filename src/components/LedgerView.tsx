@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Bell, ChevronRight, Filter, Trash2, X } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Bell, ChevronRight, Search, Trash2, X } from 'lucide-react';
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '../data/chinaTemplates';
 import {
   calcMonthLedgerSummary,
@@ -12,6 +12,7 @@ import type { CurrencyCode, LedgerEntry, SubscriptionItem } from '../types';
 
 interface Props {
   monthYm: string;
+  monthlyBudget?: number;
   entries: LedgerEntry[];
   subscriptions: SubscriptionItem[];
   rates: Record<CurrencyCode, number>;
@@ -19,10 +20,12 @@ interface Props {
   onDeleteEntry: (id: string) => void;
   onJumpToSubs: () => void;
   onOpenQuickAdd: () => void;
+  registerChildBackHandler: (fn: (() => boolean) | null) => void;
 }
 
 export const LedgerView: React.FC<Props> = ({
   monthYm,
+  monthlyBudget = 0,
   entries,
   subscriptions,
   rates,
@@ -30,12 +33,34 @@ export const LedgerView: React.FC<Props> = ({
   onDeleteEntry,
   onJumpToSubs,
   onOpenQuickAdd,
+  registerChildBackHandler,
 }) => {
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchAllHistory, setSearchAllHistory] = useState(false);
   const [showFilterBar, setShowFilterBar] = useState(false);
   const [editingEntry, setEditingEntry] = useState<LedgerEntry | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  useEffect(() => {
+    if (editingEntry) {
+      registerChildBackHandler(() => {
+        setEditingEntry(null);
+        return true;
+      });
+    } else if (showFilterBar) {
+      registerChildBackHandler(() => {
+        setShowFilterBar(false);
+        setSearchQuery('');
+        setCategoryFilter(null);
+        return true;
+      });
+    } else {
+      registerChildBackHandler(null);
+    }
+    return () => registerChildBackHandler(null);
+  }, [editingEntry, showFilterBar, registerChildBackHandler]);
 
   const summary = calcMonthLedgerSummary(monthYm, entries);
   const subMonthlyTotal = subscriptions.reduce(
@@ -49,9 +74,27 @@ export const LedgerView: React.FC<Props> = ({
     .filter((x) => x.days >= 0 && x.days <= 7)
     .sort((a, b) => a.days - b.days);
 
-  const filteredEntries = categoryFilter
-    ? summary.monthEntries.filter((e) => e.category === categoryFilter)
-    : summary.monthEntries;
+  const kw = searchQuery.trim().toLowerCase();
+  const sourcePool =
+    kw && searchAllHistory
+      ? [...entries].sort((a, b) =>
+          a.date === b.date ? b.createdAt - a.createdAt : b.date.localeCompare(a.date)
+        )
+      : summary.monthEntries;
+
+  const filteredEntries = sourcePool.filter((e) => {
+    const okCat = !categoryFilter || e.category === categoryFilter;
+    const okKw =
+      !kw ||
+      e.title.toLowerCase().includes(kw) ||
+      e.category.toLowerCase().includes(kw) ||
+      (e.note || '').toLowerCase().includes(kw);
+    return okCat && okKw;
+  });
+
+  const searchTotalOut = kw
+    ? filteredEntries.reduce((s, e) => (e.type === 'expense' ? s + e.amount : s), 0)
+    : 0;
 
   const grouped: Array<{ date: string; dayIn: number; dayOut: number; list: LedgerEntry[] }> = [];
   for (const item of filteredEntries) {
@@ -79,6 +122,9 @@ export const LedgerView: React.FC<Props> = ({
     .slice(0, 5);
 
   const monthLabel = `${parseInt(monthYm.split('-')[1] || '1', 10)}月`;
+  const budgetPct =
+    monthlyBudget > 0 ? Math.min(100, Math.round((summary.totalExpense / monthlyBudget) * 100)) : 0;
+  const budgetRemain = monthlyBudget - summary.totalExpense;
 
   return (
     <div className="space-y-3 pb-6">
@@ -90,7 +136,7 @@ export const LedgerView: React.FC<Props> = ({
         <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
           <span>{monthLabel}实际收支结余 (元)</span>
           <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
-            {showBreakdown ? '收起构成 ▲' : '点此看支出构成 ▼'}
+            {showBreakdown ? '收起构成 ▲' : '支出构成 ▼'}
           </span>
         </div>
 
@@ -118,6 +164,42 @@ export const LedgerView: React.FC<Props> = ({
             </div>
           </div>
         </div>
+
+        {/* Optional Ultra-Thin Monthly Budget Progress Line (Hidden when monthlyBudget is 0) */}
+        {monthlyBudget > 0 && (
+          <div className="mt-3.5 pt-3 border-t border-zinc-100 dark:border-zinc-800/80 space-y-1.5">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-zinc-400 dark:text-zinc-500">
+                月度消费预算 ¥{monthlyBudget.toFixed(0)}
+              </span>
+              <span
+                className={`font-mono font-medium ${
+                  budgetRemain < 0
+                    ? 'text-rose-600 dark:text-rose-400'
+                    : budgetPct >= 80
+                    ? 'text-amber-600 dark:text-amber-400'
+                    : 'text-zinc-500 dark:text-zinc-400'
+                }`}
+              >
+                {budgetRemain >= 0
+                  ? `剩余 ¥${budgetRemain.toFixed(0)} (${budgetPct}%)`
+                  : `已超支 ¥${Math.abs(budgetRemain).toFixed(0)}`}
+              </span>
+            </div>
+            <div className="h-1 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  budgetRemain < 0
+                    ? 'bg-rose-500'
+                    : budgetPct >= 80
+                    ? 'bg-amber-500'
+                    : 'bg-emerald-500'
+                }`}
+                style={{ width: `${Math.max(2, budgetPct)}%` }}
+              />
+            </div>
+          </div>
+        )}
 
         {showBreakdown && breakdownList.length > 0 && (
           <div className="mt-4 pt-3.5 border-t border-zinc-100 dark:border-zinc-800/80 space-y-2">
@@ -147,7 +229,7 @@ export const LedgerView: React.FC<Props> = ({
         )}
       </div>
 
-      {/* Quiet Renewal Banner — ONLY visible when an active subscription renews within 7 days */}
+      {/* Quiet Renewal Banner */}
       {urgentSubs.length > 0 && (
         <button
           type="button"
@@ -172,66 +254,101 @@ export const LedgerView: React.FC<Props> = ({
       {/* Minimal Section Bar */}
       <div className="flex items-center justify-between px-1 pt-1">
         <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-          收支明细{categoryFilter ? ` · ${categoryFilter}` : ''}
+          收支明细
+          {categoryFilter ? ` · ${categoryFilter}` : ''}
+          {kw ? ` · 搜索共支出 ¥${searchTotalOut.toFixed(1)}` : ''}
         </span>
         <button
           type="button"
           onClick={() => {
-            if (categoryFilter) setCategoryFilter(null);
-            setShowFilterBar((v) => !v);
+            if (showFilterBar) {
+              setCategoryFilter(null);
+              setSearchQuery('');
+              setShowFilterBar(false);
+            } else {
+              setShowFilterBar(true);
+            }
           }}
           className={`flex items-center gap-1 text-xs px-2 py-1 rounded-lg transition ${
-            categoryFilter || showFilterBar
+            categoryFilter || kw || showFilterBar
               ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
               : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300'
           }`}
         >
-          <Filter className="w-3 h-3" />
-          <span>{categoryFilter ? '清除筛选' : '分类筛选'}</span>
+          <Search className="w-3 h-3" />
+          <span>{showFilterBar ? '收起筛选' : '搜账/筛选'}</span>
         </button>
       </div>
 
+      {/* Collapsible Search & Category Filter */}
       {showFilterBar && (
-        <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-          <button
-            type="button"
-            onClick={() => setCategoryFilter(null)}
-            className={`shrink-0 px-2.5 py-1 rounded-full text-xs border ${
-              !categoryFilter
-                ? 'bg-zinc-900 text-white border-zinc-900 dark:bg-zinc-100 dark:text-zinc-900'
-                : 'bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'
-            }`}
-          >
-            全部
-          </button>
-          {Array.from(new Set(summary.monthEntries.map((e) => e.category))).map((cat) => (
+        <div className="space-y-2">
+          <div className="flex gap-1.5">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜账单名称或备注 (如：火锅、话费)..."
+              className="flex-1 px-3 py-1.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs outline-none"
+            />
             <button
-              key={cat}
               type="button"
-              onClick={() => setCategoryFilter(cat === categoryFilter ? null : cat)}
+              onClick={() => setSearchAllHistory((v) => !v)}
+              className={`px-2.5 py-1.5 rounded-xl text-[11px] font-medium border shrink-0 ${
+                searchAllHistory
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white dark:bg-zinc-900 text-zinc-500 border-zinc-200 dark:border-zinc-800'
+              }`}
+            >
+              {searchAllHistory ? '全部历史' : '仅看本月'}
+            </button>
+          </div>
+
+          <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+            <button
+              type="button"
+              onClick={() => setCategoryFilter(null)}
               className={`shrink-0 px-2.5 py-1 rounded-full text-xs border ${
-                categoryFilter === cat
+                !categoryFilter
                   ? 'bg-zinc-900 text-white border-zinc-900 dark:bg-zinc-100 dark:text-zinc-900'
                   : 'bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'
               }`}
             >
-              {cat}
+              全部
             </button>
-          ))}
+            {Array.from(new Set(sourcePool.map((e) => e.category))).map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setCategoryFilter(cat === categoryFilter ? null : cat)}
+                className={`shrink-0 px-2.5 py-1 rounded-full text-xs border ${
+                  categoryFilter === cat
+                    ? 'bg-zinc-900 text-white border-zinc-900 dark:bg-zinc-100 dark:text-zinc-900'
+                    : 'bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
       {/* Daily Grouped List */}
       {grouped.length === 0 ? (
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-8 text-center">
-          <div className="text-sm text-zinc-500 dark:text-zinc-400">本月还没有账目记录</div>
-          <button
-            type="button"
-            onClick={onOpenQuickAdd}
-            className="mt-3 px-4 py-2 rounded-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-semibold"
-          >
-            ✦ 点此记第一笔账
-          </button>
+          <div className="text-sm text-zinc-500 dark:text-zinc-400">
+            {kw || categoryFilter ? '没有找到匹配的账单记录' : '本月还没有账目记录'}
+          </div>
+          {!kw && !categoryFilter && (
+            <button
+              type="button"
+              onClick={onOpenQuickAdd}
+              className="mt-3 px-4 py-2 rounded-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-semibold"
+            >
+              ✦ 点此记第一笔账
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-2.5">
@@ -241,7 +358,7 @@ export const LedgerView: React.FC<Props> = ({
               className="bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 rounded-2xl overflow-hidden"
             >
               <div className="flex items-center justify-between px-4 py-2 bg-zinc-50/70 dark:bg-zinc-800/40 border-b border-zinc-100 dark:border-zinc-800/70 text-[11px] text-zinc-500 dark:text-zinc-400">
-                <span className="font-medium">{grp.date.slice(5)}</span>
+                <span className="font-medium">{searchAllHistory ? grp.date : grp.date.slice(5)}</span>
                 <span className="font-mono space-x-2">
                   {grp.dayIn > 0 && (
                     <span className="text-emerald-600 dark:text-emerald-400">收 +¥{grp.dayIn.toFixed(1)}</span>

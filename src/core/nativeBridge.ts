@@ -43,9 +43,15 @@ export interface JianzhangNativePlugin {
   }>;
 
   openExternalUrl(options: { url: string }): Promise<void>;
+
+  updateHomeWidget(options: {
+    monthTitle: string;
+    expenseText: string;
+    subTitleText: string;
+  }): Promise<void>;
 }
 
-export const APP_VERSION = '1.2.5';
+export const APP_VERSION = '1.3.0';
 export const GITHUB_REPO = 'sushi342119/JianZhang';
 
 const JianzhangNative = registerPlugin<JianzhangNativePlugin>('JianzhangNative');
@@ -370,5 +376,18 @@ export async function openExternalLink(url: string): Promise<void> {
     await JianzhangNative.openExternalUrl({ url });
   } else {
     window.open(url, '_blank', 'noopener,noreferrer');
+  }
+}
+
+export async function syncAndroidHomeWidget(options: {
+  monthTitle: string;
+  expenseText: string;
+  subTitleText: string;
+}): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    await JianzhangNative.updateHomeWidget(options);
+  } catch {
+    // ignore if widget not placed or unsupported
   }
 }

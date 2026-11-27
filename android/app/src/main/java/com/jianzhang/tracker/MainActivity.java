@@ -2,7 +2,9 @@ package com.jianzhang.tracker;
 
 import android.os.Bundle;
 import android.view.View;
+import android.webkit.WebView;
 
+import androidx.activity.OnBackPressedCallback;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -28,5 +30,25 @@ public class MainActivity extends BridgeActivity {
                 return WindowInsetsCompat.CONSUMED;
             });
         }
+
+        // Intercept Android side-swipe & hardware back so open sheets close first instead of exiting app
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+                if (webView == null) {
+                    moveTaskToBack(true);
+                    return;
+                }
+                webView.evaluateJavascript(
+                    "window.__jianzhangBack ? window.__jianzhangBack() : 'exit'",
+                    result -> {
+                        if (result == null || result.contains("exit")) {
+                            moveTaskToBack(true);
+                        }
+                    }
+                );
+            }
+        });
     }
 }

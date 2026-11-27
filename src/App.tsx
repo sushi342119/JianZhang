@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
@@ -17,6 +17,8 @@ import type { ParsedIntent } from './core/aiParser';
 import {
   advanceRenewalDate,
   calcDailyWorkPay,
+  calcMonthLedgerSummary,
+  daysUntilDate,
   formatYmd,
   getSubscriptionNetCycleCny,
   reconcileAutoPaydayLedger,
@@ -25,9 +27,15 @@ import {
   backupToWebDav,
   removeSubscriptionFromSystemCalendar,
   rescheduleAllSubscriptionNotifications,
+  syncAndroidHomeWidget,
   syncSubscriptionToSystemCalendar,
 } from './core/nativeBridge';
-import { getDefaultSettings, loadDatabase, saveDatabase } from './core/storage';
+import {
+  getDefaultSettings,
+  loadDatabase,
+  rollForwardOverdueSubscriptions,
+  saveDatabase,
+} from './core/storage';
 import type {
   AppDatabase,
   AppSettings,
@@ -37,6 +45,35 @@ import type {
   WorkLog,
 } from './types';
 
+declare global {
+  interface Window {
+    __jianzhangBack?: () => 'handled' | 'exit';
+  }
+}
+
+function pushHomeWidgetSnapshot(db: AppDatabase) {
+  const curYm = formatYmd(new Date()).slice(0, 7);
+  const mNum = parseInt(curYm.split('-')[1] || '1', 10);
+  const sum = calcMonthLedgerSummary(curYm, db.ledger);
+
+  const soonSub = db.subscriptions
+    .filter((s) => s.active)
+    .map((s) => ({ s, days: daysUntilDate(s.nextRenewalDate) }))
+    .filter((x) => x.days >= 0 && x.days <= 14)
+    .sort((a, b) => a.days - b.days)[0];
+
+  const balSign = sum.netBalance >= 0 ? '+' : '-';
+  const subPart = soonSub
+    ? `🔔 ${soonSub.days === 0 ? '今日' : `${soonSub.days}天后`} ${soonSub.s.name}`
+    : `${db.subscriptions.filter((s) => s.active).length}项订阅生效中`;
+
+  syncAndroidHomeWidget({
+    monthTitle: `简账 · ${mNum}月`,
+    expenseText: `本月支出 ¥${sum.totalExpense.toFixed(2)}`,
+    subTitleText: `结余 ${balSign}¥${Math.abs(sum.netBalance).toFixed(0)} · ${subPart}`,
+  });
+}
+
 export function App() {
   const [db, setDb] = useState<AppDatabase | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>('ledger');
@@ -44,6 +81,11 @@ export function App() {
   const [quickOpen, setQuickOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const childBackRef = useRef<(() => boolean) | null>(null);
+
+  const registerChildBackHandler = useCallback((fn: (() => boolean) | null) => {
+    childBackRef.current = fn;
+  }, []);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -56,18 +98,46 @@ export function App() {
     loadDatabase().then((loaded) => {
       setDb(loaded);
       rescheduleAllSubscriptionNotifications(loaded.subscriptions);
+      pushHomeWidgetSnapshot(loaded);
     });
   }, []);
 
-  // Re-check payday auto-merge whenever app returns to foreground (e.g. crossing midnight into payday)
+  // Native Android back gesture & hardware back key interceptor
+  useEffect(() => {
+    window.__jianzhangBack = () => {
+      if (settingsOpen) {
+        setSettingsOpen(false);
+        return 'handled';
+      }
+      if (quickOpen) {
+        setQuickOpen(false);
+        return 'handled';
+      }
+      if (childBackRef.current && childBackRef.current()) {
+        return 'handled';
+      }
+      if (activeTab !== 'ledger') {
+        setActiveTab('ledger');
+        return 'handled';
+      }
+      return 'exit';
+    };
+    return () => {
+      delete window.__jianzhangBack;
+    };
+  }, [settingsOpen, quickOpen, activeTab]);
+
+  // Re-check payday & auto-renew subscriptions when returning to foreground
   useEffect(() => {
     const onVis = () => {
       if (document.visibilityState === 'visible') {
         setDb((prev) => {
           if (!prev) return prev;
-          const { db: reconciled, newlySettledMonths } = reconcileAutoPaydayLedger(prev);
+          const rolled = rollForwardOverdueSubscriptions(prev);
+          const { db: reconciled, newlySettledMonths } = reconcileAutoPaydayLedger(rolled);
           if (newlySettledMonths.length > 0 || reconciled !== prev) {
             saveDatabase(reconciled);
+            pushHomeWidgetSnapshot(reconciled);
             return reconciled;
           }
           return prev;
@@ -93,9 +163,11 @@ export function App() {
   }, [db]);
 
   const persist = (rawNext: AppDatabase) => {
-    const { db: next, newlySettledMonths } = reconcileAutoPaydayLedger(rawNext);
+    const subRolled = rollForwardOverdueSubscriptions(rawNext);
+    const { db: next, newlySettledMonths } = reconcileAutoPaydayLedger(subRolled);
     setDb(next);
     saveDatabase(next);
+    pushHomeWidgetSnapshot(next);
     if (newlySettledMonths.length > 0) {
       const mNum = parseInt(newlySettledMonths[0].split('-')[1] || '1', 10);
       showToast(`已达发薪日，${mNum}月工资已自动合并入账本`);
@@ -159,6 +231,31 @@ export function App() {
 
     const nextWorkLogs = [updatedLog, ...db.workLogs.filter((w) => w.date !== input.date)];
     persist({ ...db, workLogs: nextWorkLogs });
+  };
+
+  const handleBatchFillStandardDays = (dates: string[]) => {
+    if (dates.length === 0) return;
+    const stdHours = db.settings.work.standardHoursPerDay || 8;
+    const newLogs: WorkLog[] = dates.map((d) => {
+      const base: WorkLog = {
+        id: `w-${d}`,
+        date: d,
+        regularHours: stdHours,
+        overtimeHours: 0,
+        overtimeTier: 'weekday',
+        includeMeal: true,
+      };
+      return {
+        ...base,
+        calculatedPay: calcDailyWorkPay(base, db.settings.work).totalDailyPay,
+      };
+    });
+
+    persist({
+      ...db,
+      workLogs: [...newLogs, ...db.workLogs],
+    });
+    showToast(`已一键补齐 ${dates.length} 天标准班工时`);
   };
 
   const handleDeleteWorkLog = (date: string) => {
@@ -357,11 +454,11 @@ export function App() {
           {activeTab === 'ledger' && (
             <LedgerView
               monthYm={monthYm}
+              monthlyBudget={db.settings.monthlyBudget}
               entries={db.ledger}
               subscriptions={db.subscriptions}
               rates={db.settings.exchangeRates}
               onUpdateEntry={(updated: LedgerEntry) => {
-                // Mark as 'manual' so auto-reconcile preserves user's custom post-tax edit
                 const locked: LedgerEntry = { ...updated, source: 'manual' };
                 persist({
                   ...db,
@@ -385,6 +482,7 @@ export function App() {
               }}
               onJumpToSubs={() => setActiveTab('subs')}
               onOpenQuickAdd={() => setQuickOpen(true)}
+              registerChildBackHandler={registerChildBackHandler}
             />
           )}
 
@@ -395,6 +493,7 @@ export function App() {
               workSettings={db.settings.work}
               settledEntry={settledForMonth}
               onSaveWorkLog={handleSaveWorkLog}
+              onBatchFillStandardDays={handleBatchFillStandardDays}
               onDeleteWorkLog={handleDeleteWorkLog}
               onUpdateMonthTargetDays={handleUpdateMonthTargetDays}
               onOpenWorkSettings={() => setSettingsOpen(true)}
@@ -410,6 +509,7 @@ export function App() {
               onDeleteSub={handleDeleteSub}
               onRenewOneCycle={handleRenewOneCycle}
               onToggleCalendar={(sub) => handleUpsertSub(sub, !sub.syncSystemCalendar)}
+              registerChildBackHandler={registerChildBackHandler}
             />
           )}
         </main>

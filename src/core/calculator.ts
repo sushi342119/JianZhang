@@ -127,9 +127,6 @@ export function daysUntilDate(targetYmd: string, todayYmd: string = formatYmd(ne
   return Math.round((t.getTime() - now.getTime()) / 86400000);
 }
 
-/**
- * Count Monday-Friday normal workdays in a given YYYY-MM month
- */
 export function countWeekdaysInMonth(monthYm: string): number {
   const [y, m] = monthYm.split('-').map(Number);
   if (!y || !m) return 22;
@@ -140,6 +137,31 @@ export function countWeekdaysInMonth(monthYm: string): number {
     if (dow >= 1 && dow <= 5) count++;
   }
   return count;
+}
+
+/**
+ * List elapsed Mon-Fri YYYY-MM-DD strings in monthYm up to todayYmd (inclusive)
+ */
+export function getElapsedWeekdaysInMonth(
+  monthYm: string,
+  todayYmd: string = formatYmd(new Date())
+): string[] {
+  const [y, m] = monthYm.split('-').map(Number);
+  if (!y || !m) return [];
+  const currentYm = todayYmd.slice(0, 7);
+  if (monthYm > currentYm) return [];
+
+  const totalDays = new Date(y, m, 0).getDate();
+  const maxDay = monthYm === currentYm ? Math.min(totalDays, parseInt(todayYmd.slice(8, 10), 10) || totalDays) : totalDays;
+  const result: string[] = [];
+
+  for (let d = 1; d <= maxDay; d++) {
+    const dow = new Date(y, m - 1, d).getDay();
+    if (dow >= 1 && dow <= 5) {
+      result.push(`${monthYm}-${String(d).padStart(2, '0')}`);
+    }
+  }
+  return result;
 }
 
 export function getTargetWorkdaysForMonth(monthYm: string, ws: WorkSettings): number {
@@ -206,11 +228,16 @@ export function calcDailyWorkPay(log: WorkLog, ws: WorkSettings): {
 }
 
 /**
- * Monthly summary including:
- * - Daily meal allowance (15 CNY/day worked)
- * - Monthly housing allowance (200 CNY full normal workday attendance; deducted per absent day otherwise)
+ * Monthly summary:
+ * - Does NOT prematurely deduct housing allowance for future unelapsed weekdays in the current month!
+ * - Applies optional monthlyFixedDeduction (social insurance / dorm utilities) to compute net take-home pay.
  */
-export function calcMonthWorkSummary(monthYm: string, logs: WorkLog[], ws: WorkSettings) {
+export function calcMonthWorkSummary(
+  monthYm: string,
+  logs: WorkLog[],
+  ws: WorkSettings,
+  todayYmd: string = formatYmd(new Date())
+) {
   const monthLogs = logs.filter((l) => l.date.startsWith(monthYm));
   const stdHours = ws.standardHoursPerDay || 8;
   const targetWorkdays = getTargetWorkdaysForMonth(monthYm, ws);
@@ -230,7 +257,6 @@ export function calcMonthWorkSummary(monthYm: string, logs: WorkLog[], ws: WorkS
       workDays += 1;
     }
     if (log.regularHours > 0) {
-      // Full normal shift = 1 day; half-day shift (e.g. 4h/8h) = 0.5 day
       attendedNormalDays += Math.min(1, log.regularHours / stdHours);
     }
     regularHours += log.regularHours;
@@ -246,13 +272,23 @@ export function calcMonthWorkSummary(monthYm: string, logs: WorkLog[], ws: WorkS
     bonusPay += d.bonus;
   }
 
-  // Housing allowance calculation:
-  // Full monthlyHousingAllowance (200) if attendedNormalDays >= targetWorkdays;
-  // Otherwise deduct per shortfall day!
+  // Future weekdays in current month should NOT be counted as absent yet
+  const currentYm = todayYmd.slice(0, 7);
+  let futureWeekdaysCount = 0;
+  if (monthYm === currentYm) {
+    const totalWeekdays = countWeekdaysInMonth(monthYm);
+    const elapsedWeekdays = getElapsedWeekdaysInMonth(monthYm, todayYmd).length;
+    futureWeekdaysCount = Math.max(0, totalWeekdays - elapsedWeekdays);
+  } else if (monthYm > currentYm) {
+    futureWeekdaysCount = targetWorkdays;
+  }
+
+  const dueWorkdaysSoFar = Math.max(0, targetWorkdays - futureWeekdaysCount);
+  const shortfallDays = Math.max(0, Number((dueWorkdaysSoFar - attendedNormalDays).toFixed(2)));
+
   const housingMax = ws.monthlyHousingAllowance ?? 200;
   let housingAllowance = 0;
   let housingDeduction = 0;
-  const shortfallDays = Math.max(0, Number((targetWorkdays - attendedNormalDays).toFixed(2)));
 
   if (workDays > 0 && housingMax > 0 && targetWorkdays > 0) {
     if (shortfallDays <= 0) {
@@ -275,12 +311,15 @@ export function calcMonthWorkSummary(monthYm: string, logs: WorkLog[], ws: WorkS
         : 0
       : regularPay;
 
-  const totalEstimatedPay = basePay + overtimePay + mealPay + housingAllowance + bonusPay;
+  const grossPay = basePay + overtimePay + mealPay + housingAllowance + bonusPay;
+  const fixedDeduction = workDays > 0 ? Math.max(0, ws.monthlyFixedDeduction || 0) : 0;
+  const totalEstimatedPay = Math.max(0, grossPay - fixedDeduction);
 
   return {
     workDays,
     attendedNormalDays: Number(attendedNormalDays.toFixed(2)),
     targetWorkdays,
+    dueWorkdaysSoFar,
     shortfallDays,
     regularHours,
     overtimeHours,
@@ -293,6 +332,8 @@ export function calcMonthWorkSummary(monthYm: string, logs: WorkLog[], ws: WorkS
     housingAllowance,
     housingDeduction,
     bonusPay,
+    grossPay,
+    fixedDeduction,
     totalEstimatedPay,
     monthLogs,
   };
@@ -325,12 +366,9 @@ export function calcMonthLedgerSummary(monthYm: string, entries: LedgerEntry[]) 
   };
 }
 
-/**
- * Compute scheduled next-month payday YYYY-MM-DD for a given work month YYYY-MM
- */
 export function getNextMonthPayday(monthYm: string, paydayOfMonth: number): string {
   const [y, m] = monthYm.split('-').map(Number);
-  const nextMonthFirst = new Date(y, m, 1); // m is 1-based, so JS month index m is M+1
+  const nextMonthFirst = new Date(y, m, 1);
   const ny = nextMonthFirst.getFullYear();
   const nm = nextMonthFirst.getMonth() + 1;
   const maxDay = new Date(ny, nm, 0).getDate();
@@ -338,9 +376,6 @@ export function getNextMonthPayday(monthYm: string, paydayOfMonth: number): stri
   return `${ny}-${String(nm).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}`;
 }
 
-/**
- * Automatically merge accrued monthly salaries into the Ledger once today >= scheduled payday
- */
 export function reconcileAutoPaydayLedger(
   db: AppDatabase,
   todayYmd: string = formatYmd(new Date())
@@ -355,7 +390,6 @@ export function reconcileAutoPaydayLedger(
   let changed = false;
   const newlySettledMonths: string[] = [];
 
-  // Also check any existing work_sync payday-* entries whose payday was moved into the future
   for (const entry of db.ledger) {
     if (entry.source === 'work_sync' && entry.linkedId?.startsWith('payday-')) {
       const srcYm = entry.linkedId.slice('payday-'.length);
@@ -370,17 +404,19 @@ export function reconcileAutoPaydayLedger(
   if (autoEnabled) {
     for (const ym of distinctMonths) {
       const dueYmd = getNextMonthPayday(ym, paydayDay);
-      if (todayYmd < dueYmd) continue; // Not payday yet! Keep strictly in Work tab.
-      if (dismissed.has(ym)) continue; // User explicitly deleted this month's salary entry.
+      if (todayYmd < dueYmd) continue;
+      if (dismissed.has(ym)) continue;
 
-      const summary = calcMonthWorkSummary(ym, db.workLogs, ws);
+      const summary = calcMonthWorkSummary(ym, db.workLogs, ws, todayYmd);
       const linkKey = `payday-${ym}`;
       const existing = nextLedger.find((e) => e.linkedId === linkKey);
       const srcMonthNum = parseInt(ym.split('-')[1] || '1', 10);
       const amt = Number(summary.totalEstimatedPay.toFixed(2));
+      const deductNote =
+        summary.fixedDeduction > 0 ? `/扣项-¥${summary.fixedDeduction.toFixed(0)}` : '';
       const note = `${srcMonthNum}月出勤${summary.workDays}天 (含餐补¥${summary.mealPay.toFixed(
         0
-      )}/房补¥${summary.housingAllowance.toFixed(0)})`;
+      )}/房补¥${summary.housingAllowance.toFixed(0)}${deductNote})`;
 
       if (amt <= 0) {
         if (existing && existing.source === 'work_sync') {
@@ -406,7 +442,6 @@ export function reconcileAutoPaydayLedger(
         newlySettledMonths.push(ym);
         changed = true;
       } else if (existing.source === 'work_sync') {
-        // Keep auto-synced entry up to date if user adjusted past work logs or payday date
         if (existing.amount !== amt || existing.date !== dueYmd || existing.note !== note) {
           nextLedger = nextLedger.map((e) =>
             e.id === existing.id ? { ...e, amount: amt, date: dueYmd, note } : e
@@ -414,7 +449,6 @@ export function reconcileAutoPaydayLedger(
           changed = true;
         }
       }
-      // If existing.source === 'manual', user manually edited post-tax amount in Ledger -> preserve!
     }
   }
 

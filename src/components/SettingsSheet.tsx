@@ -220,6 +220,24 @@ export const SettingsSheet: React.FC<Props> = ({
               />
             </div>
 
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-zinc-500">
+                每月固定扣除项 (社保/公积金/水电等 ¥/月)
+              </span>
+              <input
+                type="number"
+                step="10"
+                value={settings.work.monthlyFixedDeduction || ''}
+                onChange={(e) =>
+                  updateWork({
+                    monthlyFixedDeduction: parseFloat(e.target.value) || 0,
+                  })
+                }
+                placeholder="0"
+                className="w-24 px-2.5 py-1 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-xs font-mono text-right outline-none"
+              />
+            </div>
+
             <div className="grid grid-cols-3 gap-2 pt-1 border-t border-zinc-100 dark:border-zinc-800">
               <div>
                 <label className="text-[11px] text-zinc-400">平日加班倍率</label>
@@ -413,38 +431,79 @@ export const SettingsSheet: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* 3. Calendar Batch Sync */}
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl p-4 border border-zinc-200/80 dark:border-zinc-800 flex items-center justify-between">
-            <div>
-              <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
-                📅 批量同步所有会员至系统日历
+          {/* 3. Budget & Subscription Auto-Expense */}
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl p-4 border border-zinc-200/80 dark:border-zinc-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                  🎯 每月消费预算提醒线 (选填)
+                </div>
+                <div className="text-[11px] text-zinc-400">设为 0 则在账本首页完全隐藏</div>
               </div>
-              <div className="text-[11px] text-zinc-400 mt-0.5">
-                一键写入本机日历或导出 .ics 日历订阅文件
-              </div>
+              <input
+                type="number"
+                step="100"
+                value={settings.monthlyBudget || ''}
+                onChange={(e) =>
+                  onUpdateSettings({
+                    ...settings,
+                    monthlyBudget: Math.max(0, parseFloat(e.target.value) || 0),
+                  })
+                }
+                placeholder="未设置"
+                className="w-24 px-2.5 py-1.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-xs font-mono text-right outline-none"
+              />
             </div>
-            <div className="flex gap-1.5">
-              <button
-                type="button"
-                onClick={onSyncAllCalendars}
-                className="px-3 py-1.5 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-semibold flex items-center gap-1"
-              >
-                <Calendar className="w-3.5 h-3.5" /> 一键同步
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  const msg = await exportAndShareFile(
-                    '简账会员续费提醒.ics',
-                    generateIcsForSubscriptions(db.subscriptions),
-                    'text/calendar'
-                  );
-                  onToast(msg);
-                }}
-                className="px-2.5 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs"
-              >
-                .ics
-              </button>
+
+            <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                  💳 自动续费会员到期自动记入账本支出
+                </div>
+                <div className="text-[11px] text-zinc-400">到达续费日自动顺延下期并生成一笔账本扣费</div>
+              </div>
+              <input
+                type="checkbox"
+                checked={settings.autoRecordSubExpense !== false}
+                onChange={(e) =>
+                  onUpdateSettings({ ...settings, autoRecordSubExpense: e.target.checked })
+                }
+                className="w-4 h-4 accent-blue-600 shrink-0 ml-2"
+              />
+            </div>
+
+            <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                  📅 批量同步所有会员至系统日历
+                </div>
+                <div className="text-[11px] text-zinc-400 mt-0.5">
+                  一键写入本机日历或导出 .ics 日历订阅文件
+                </div>
+              </div>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={onSyncAllCalendars}
+                  className="px-3 py-1.5 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-semibold flex items-center gap-1"
+                >
+                  <Calendar className="w-3.5 h-3.5" /> 一键同步
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const msg = await exportAndShareFile(
+                      '简账会员续费提醒.ics',
+                      generateIcsForSubscriptions(db.subscriptions),
+                      'text/calendar'
+                    );
+                    onToast(msg);
+                  }}
+                  className="px-2.5 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs"
+                >
+                  .ics
+                </button>
+              </div>
             </div>
           </div>
 

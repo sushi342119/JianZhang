@@ -4,7 +4,9 @@ import android.Manifest;
 import android.content.ContentResolver;
 import android.content.ContentUris;
 import android.content.ContentValues;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.CalendarContract;
@@ -382,6 +384,30 @@ public class JianzhangNativePlugin extends Plugin {
             call.resolve();
         } catch (Exception e) {
             call.reject("打开外部浏览器失败: " + e.getMessage(), e);
+        }
+    }
+
+    @PluginMethod
+    public void updateHomeWidget(PluginCall call) {
+        try {
+            String monthTitle = call.getString("monthTitle", "简账");
+            String expenseText = call.getString("expenseText", "本月支出 ¥0.00");
+            String subTitleText = call.getString("subTitleText", "");
+
+            SharedPreferences prefs = getContext().getSharedPreferences(
+                JianzhangWidgetProvider.PREFS_NAME,
+                Context.MODE_PRIVATE
+            );
+            prefs.edit()
+                .putString(JianzhangWidgetProvider.KEY_MONTH, monthTitle)
+                .putString(JianzhangWidgetProvider.KEY_EXPENSE, expenseText)
+                .putString(JianzhangWidgetProvider.KEY_SUBTITLE, subTitleText)
+                .apply();
+
+            JianzhangWidgetProvider.updateAllWidgets(getContext());
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("更新桌面小组件失败: " + e.getMessage(), e);
         }
     }
 }
