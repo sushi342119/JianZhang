@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Minimalist Wallet/Ledger Card Frame -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M33,31h42c3.31,0 6,2.69 6,6v34c0,3.31 -2.69,6 -6,6H33c-3.31,0 -6,-2.69 -6,-6V37c0,-3.31 2.69,-6 6,-6z" />
+    <!-- Clean Ledger Lines -->
+    <path
+        android:fillColor="#18181B"
+        android:pathData="M35,43h22v4.5H35zM35,52.5h30V57H35zM35,62h16v4.5H35z" />
+    <!-- Accent Sparkle Dot -->
+    <path
+        android:fillColor="#10B981"
+        android:pathData="M68,60.5a4.5,4.5 0,1 1,0 9a4.5,4.5 0,1 1,0 -9z" />
+</vector>

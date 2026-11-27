@@ -1,0 +1,24 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif;
+  background-color: #fafafa;
+}
+
+html.dark body {
+  background-color: #09090b;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
