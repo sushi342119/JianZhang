@@ -34,7 +34,19 @@ export interface JianzhangNativePlugin {
     remoteFolder: string;
     fileName: string;
   }): Promise<{ ok: boolean; status: number; content?: string; message?: string }>;
+
+  checkLatestRelease(options: { repo: string }): Promise<{
+    tagName: string;
+    htmlUrl: string;
+    downloadUrl: string;
+    notes: string;
+  }>;
+
+  openExternalUrl(options: { url: string }): Promise<void>;
 }
+
+export const APP_VERSION = '1.2.4';
+export const GITHUB_REPO = 'sushi342119/JianZhang';
 
 const JianzhangNative = registerPlugin<JianzhangNativePlugin>('JianzhangNative');
 
@@ -307,5 +319,56 @@ export async function exportAndShareFile(
     a.click();
     URL.revokeObjectURL(url);
     return `已下载备份文件 ${fileName}`;
+  }
+}
+
+function compareSemver(latestTag: string, currentVer: string): number {
+  const clean = (s: string) => s.replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+  const a = clean(latestTag);
+  const b = clean(currentVer);
+  for (let i = 0; i < 3; i++) {
+    if ((a[i] || 0) > (b[i] || 0)) return 1;
+    if ((a[i] || 0) < (b[i] || 0)) return -1;
+  }
+  return 0;
+}
+
+export async function checkGithubReleaseUpdate(): Promise<{
+  hasUpdate: boolean;
+  latestVersion: string;
+  downloadUrl: string;
+  htmlUrl: string;
+  notes: string;
+}> {
+  if (Capacitor.isNativePlatform()) {
+    const res = await JianzhangNative.checkLatestRelease({ repo: GITHUB_REPO });
+    return {
+      hasUpdate: compareSemver(res.tagName, APP_VERSION) > 0,
+      latestVersion: res.tagName.replace(/^v/i, ''),
+      downloadUrl: res.downloadUrl,
+      htmlUrl: res.htmlUrl,
+      notes: res.notes,
+    };
+  }
+
+  const resp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  const tagName: string = data.tag_name || APP_VERSION;
+  const apkAsset = (data.assets || []).find((a: { name?: string }) => a.name?.endsWith('.apk'));
+  return {
+    hasUpdate: compareSemver(tagName, APP_VERSION) > 0,
+    latestVersion: tagName.replace(/^v/i, ''),
+    downloadUrl: apkAsset?.browser_download_url || data.html_url,
+    htmlUrl: data.html_url,
+    notes: data.body || '',
+  };
+}
+
+export async function openExternalLink(url: string): Promise<void> {
+  if (Capacitor.isNativePlatform()) {
+    await JianzhangNative.openExternalUrl({ url });
+  } else {
+    window.open(url, '_blank', 'noopener,noreferrer');
   }
 }

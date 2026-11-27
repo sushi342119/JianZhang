@@ -2,9 +2,13 @@ import React, { useRef, useState } from 'react';
 import { Calendar, Cloud, Download, RotateCcw, Upload, X } from 'lucide-react';
 import { exportDatabaseCsv } from '../core/storage';
 import {
+  APP_VERSION,
   backupToWebDav,
+  checkGithubReleaseUpdate,
   exportAndShareFile,
   generateIcsForSubscriptions,
+  GITHUB_REPO,
+  openExternalLink,
   restoreFromWebDav,
 } from '../core/nativeBridge';
 import type { AppDatabase, AppSettings, SalaryMode } from '../types';
@@ -32,6 +36,13 @@ export const SettingsSheet: React.FC<Props> = ({
 }) => {
   const [busy, setBusy] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<{
+    hasUpdate: boolean;
+    latestVersion: string;
+    downloadUrl: string;
+    notes: string;
+  } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   if (!open) return null;
@@ -509,6 +520,72 @@ export const SettingsSheet: React.FC<Props> = ({
                 <RotateCcw className="w-3 h-3" /> {confirmReset ? '再点确认清空' : '清空数据'}
               </button>
             </div>
+          </div>
+
+          {/* 5. GitHub Version & One-Click Update Checker */}
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl p-4 border border-zinc-200/80 dark:border-zinc-800 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                  📦 版本与 GitHub 更新
+                </div>
+                <div className="text-[11px] text-zinc-400 font-mono mt-0.5">
+                  当前版本 v{APP_VERSION} · {GITHUB_REPO}
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => openExternalLink(`https://github.com/${GITHUB_REPO}/releases`)}
+                  className="px-2.5 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs text-zinc-600 dark:text-zinc-300"
+                >
+                  发布页
+                </button>
+                <button
+                  type="button"
+                  disabled={checkingUpdate}
+                  onClick={async () => {
+                    setCheckingUpdate(true);
+                    try {
+                      const info = await checkGithubReleaseUpdate();
+                      setUpdateInfo(info);
+                      onToast(
+                        info.hasUpdate
+                          ? `发现新版本 v${info.latestVersion}！`
+                          : `当前已是最新版本 (v${APP_VERSION})`
+                      );
+                    } catch (err: unknown) {
+                      onToast(err instanceof Error ? err.message : '检查更新失败，请稍后重试');
+                    } finally {
+                      setCheckingUpdate(false);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-semibold disabled:opacity-50"
+                >
+                  {checkingUpdate ? '检查中...' : '检查更新'}
+                </button>
+              </div>
+            </div>
+
+            {updateInfo && updateInfo.hasUpdate && (
+              <div className="p-3 rounded-xl bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 space-y-2">
+                <div className="text-xs font-bold text-blue-700 dark:text-blue-300">
+                  发现 GitHub 新版 v{updateInfo.latestVersion}
+                </div>
+                {updateInfo.notes && (
+                  <div className="text-[11px] text-zinc-600 dark:text-zinc-300 whitespace-pre-line line-clamp-4">
+                    {updateInfo.notes}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => openExternalLink(updateInfo.downloadUrl)}
+                  className="w-full py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold"
+                >
+                  下载新版 APK 并覆盖安装
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

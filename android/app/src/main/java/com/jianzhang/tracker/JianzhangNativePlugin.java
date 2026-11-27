@@ -4,6 +4,7 @@ import android.Manifest;
 import android.content.ContentResolver;
 import android.content.ContentUris;
 import android.content.ContentValues;
+import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.CalendarContract;
@@ -21,7 +22,9 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 
+import org.json.JSONArray;
 import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.nio.charset.StandardCharsets;
 import java.util.TimeZone;
@@ -315,5 +318,70 @@ public class JianzhangNativePlugin extends Plugin {
                 call.resolve(ret);
             }
         });
+    }
+
+    @PluginMethod
+    public void checkLatestRelease(PluginCall call) {
+        final String repo = call.getString("repo", "sushi342119/JianZhang");
+        ioExecutor.execute(() -> {
+            try {
+                Request req = new Request.Builder()
+                    .url("https://api.github.com/repos/" + repo + "/releases/latest")
+                    .header("Accept", "application/vnd.github+json")
+                    .header("User-Agent", "JianZhang-Android-Updater")
+                    .get()
+                    .build();
+
+                try (Response resp = httpClient.newCall(req).execute()) {
+                    ResponseBody body = resp.body();
+                    if (!resp.isSuccessful() || body == null) {
+                        call.reject("查询 GitHub 版本失败 (HTTP " + resp.code() + ")");
+                        return;
+                    }
+                    JSONObject json = new JSONObject(body.string());
+                    String tagName = json.optString("tag_name", "");
+                    String htmlUrl = json.optString("html_url", "https://github.com/" + repo + "/releases");
+                    String notes = json.optString("body", "");
+                    String apkUrl = htmlUrl;
+
+                    JSONArray assets = json.optJSONArray("assets");
+                    if (assets != null) {
+                        for (int i = 0; i < assets.length(); i++) {
+                            JSONObject a = assets.optJSONObject(i);
+                            if (a != null && a.optString("name", "").endsWith(".apk")) {
+                                apkUrl = a.optString("browser_download_url", htmlUrl);
+                                break;
+                            }
+                        }
+                    }
+
+                    JSObject ret = new JSObject();
+                    ret.put("tagName", tagName);
+                    ret.put("htmlUrl", htmlUrl);
+                    ret.put("downloadUrl", apkUrl);
+                    ret.put("notes", notes);
+                    call.resolve(ret);
+                }
+            } catch (Exception e) {
+                call.reject("无法连接 GitHub 检查更新: " + e.getMessage(), e);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void openExternalUrl(PluginCall call) {
+        String url = call.getString("url", "");
+        if (url == null || url.isEmpty()) {
+            call.reject("链接为空");
+            return;
+        }
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("打开外部浏览器失败: " + e.getMessage(), e);
+        }
     }
 }
